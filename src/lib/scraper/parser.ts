@@ -54,20 +54,31 @@ export function parseSearchResults(html: string): {
     });
   }
 
-  // Check for next page
-  const hasNext =
-    $('a[data-testid="pagination-next"]').length > 0 ||
-    $('[class*="next"]').filter('a, button').length > 0 ||
-    $('a:contains("nächste")').length > 0 ||
-    $('a:contains("Nächste")').length > 0;
-
-  // Try to get total results count
+  // Try to get total results count — scan all text nodes for the pattern
   let totalResults: number | undefined;
-  const resultCountText = $('h1, [class*="result-count"], [class*="totalCount"]').first().text();
-  const countMatch = resultCountText.match(/([\d.]+)\s*(Ergebnis|Treffer|Angebot)/i);
+  const fullText = $.text();
+  const countMatch = fullText.match(/([\d.]+)\s*(Ergebnis(?:se)?|Treffer|Angebote?)\b/i);
   if (countMatch) {
     totalResults = parseInt(countMatch[1].replace(/\./g, ''), 10);
   }
+
+  // Check for next page — use multiple strategies in priority order:
+  // 1. Explicit "next" pagination link/button
+  const hasNextLink =
+    $('a[data-testid="pagination-next"]').length > 0 ||
+    $('a[aria-label*="nächste"], a[aria-label*="next"], a[aria-label*="Nächste"]').length > 0 ||
+    $('button[aria-label*="nächste"], button[aria-label*="next"]').length > 0 ||
+    $('a:contains("Nächste Seite"), a:contains("nächste Seite")').length > 0 ||
+    $('[class*="pagination"] a[class*="next"], [class*="pagination"] a[class*="Next"]').length > 0 ||
+    // mobile.de uses data-testid on nav buttons
+    $('[data-testid*="next"], [data-testid*="Next"]').filter('a, button').length > 0;
+
+  // 2. We got a full page of results → almost certainly more pages exist
+  const gotFullPage = listings.length >= 20;
+
+  // 3. Cross-check: if we know total results, we can be sure
+  //    (caller tracks offset so we just say hasNext = true while results keep coming)
+  const hasNext = hasNextLink || gotFullPage;
 
   return { listings, hasNext, totalResults };
 }

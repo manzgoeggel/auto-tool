@@ -90,6 +90,8 @@ export async function scrapeMobileDe(
 
   console.log(`Starting scrape for config: ${config.name} (${existingIds.size} known IDs to skip detail fetch)`);
 
+  let consecutiveEmpty = 0;
+
   while (hasMorePages && page <= maxPages) {
     try {
       const url = buildSearchUrl(config, page);
@@ -104,17 +106,31 @@ export async function scrapeMobileDe(
       }
 
       if (result.listings.length === 0) {
-        console.log(`No listings found on page ${page}, stopping`);
-        break;
+        consecutiveEmpty++;
+        console.log(`No listings on page ${page} (empty #${consecutiveEmpty})`);
+        // Allow 1 empty page (could be a transient parse issue) but stop on 2
+        if (consecutiveEmpty >= 2) {
+          console.log('Two consecutive empty pages — stopping');
+          break;
+        }
+        page++;
+        continue;
       }
 
+      consecutiveEmpty = 0;
       allListings.push(...result.listings);
       hasMorePages = result.hasNext;
       page++;
 
       console.log(
-        `Page ${page - 1}: found ${result.listings.length} listings (total: ${allListings.length})`,
+        `Page ${page - 1}: found ${result.listings.length} listings (total so far: ${allListings.length}${totalResults ? '/' + totalResults : ''})`,
       );
+
+      // Stop early if we've collected all known results
+      if (totalResults !== undefined && allListings.length >= totalResults) {
+        console.log(`Collected all ${totalResults} results, stopping`);
+        break;
+      }
 
       // Rate limiting: random delay between 3-6 seconds (render=true requests are slower)
       if (hasMorePages && page <= maxPages) {
