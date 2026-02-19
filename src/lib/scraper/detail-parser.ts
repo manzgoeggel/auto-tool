@@ -26,14 +26,46 @@ export function parseDetailPage(html: string): DetailPageData {
     allText.includes('Nettopreis') ||
     $('[data-testid*="vat"], [class*="vat"], [class*="mwst"]').length > 0;
 
-  // Accident damage
-  const hasAccidentDamage =
-    allText.includes('Unfallschaden') ||
-    allText.includes('Unfallfahrzeug') ||
-    allText.includes('Karosserieschaden') ||
-    allText.includes('Totalschaden') ||
-    allText.includes('beschädigt') ||
-    allText.includes('Vorschaden');
+  // Accident damage — use targeted approach to avoid false positives from "kein Unfallschaden" etc.
+  const hasAccidentDamage = (() => {
+    // First try structured data-testid / known label patterns
+    const damageEls = $('[data-testid*="damage"], [data-testid*="accident"], [class*="damage"]');
+    if (damageEls.length > 0) {
+      const txt = damageEls.text().toLowerCase();
+      if (txt.includes('ja') || txt.includes('yes') || txt.includes('vorhanden')) return true;
+      if (txt.includes('nein') || txt.includes('no') || txt.includes('kein')) return false;
+    }
+
+    // Try to find the specific "Unfallschaden" label row and check the value next to it
+    let damaged = false;
+    $('dt, th, [class*="label"], [class*="key"]').each((_, el) => {
+      const label = $(el).text().trim().toLowerCase();
+      if (label.includes('unfallschaden') || label.includes('schaden')) {
+        const value = $(el).next().text().trim().toLowerCase();
+        if (value.includes('ja') || value.includes('yes') || value.includes('vorhanden')) {
+          damaged = true;
+        }
+      }
+    });
+    if (damaged) return true;
+
+    // Fallback: only very strong signals, never "kein Vorschaden" / "Unfallschaden: Nein"
+    const lower = allText.toLowerCase();
+    if (lower.includes('totalschaden')) return true;
+    if (lower.includes('unfallfahrzeug')) return true;
+    if (lower.includes('karosserieschaden')) return true;
+
+    // "Unfallschaden" — check context
+    const unfallMatch = allText.match(/Unfallschaden[:\s]*([^\n,]{0,30})/i);
+    if (unfallMatch) {
+      const ctx = unfallMatch[1].toLowerCase().trim();
+      if (ctx.startsWith('ja') || ctx.includes('vorhanden')) return true;
+      if (ctx.startsWith('nein') || ctx.includes('kein') || ctx.startsWith('ohne')) return false;
+      if (ctx === '' || ctx === ':') return true;
+    }
+
+    return false;
+  })();
 
   // Description — try multiple selectors
   const description =

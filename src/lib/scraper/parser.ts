@@ -156,13 +156,26 @@ function parseListingElement(
     allText.includes('MwSt. ausw.') ||
     allText.includes('Netto');
 
-  // Check for accident damage
-  const hasAccidentDamage =
-    allText.includes('Unfallschaden') ||
-    allText.includes('Unfallfahrzeug') ||
-    allText.includes('Karosserieschaden') ||
-    allText.includes('Totalschaden') ||
-    allText.includes('beschädigt');
+  // Check for accident damage — only clear positive signals, not negations
+  // Avoid matching "kein Unfallschaden", "Unfallschaden: Nein", "unbeschädigt", etc.
+  const hasAccidentDamage = (() => {
+    const lower = allText.toLowerCase();
+    // Strong positive signals
+    if (lower.includes('totalschaden')) return true;
+    if (lower.includes('unfallfahrzeug')) return true;
+    if (lower.includes('karosserieschaden')) return true;
+    // "Unfallschaden" — only positive if followed by "ja" or "vorhanden", not "nein" / "kein"
+    const unfallMatch = allText.match(/Unfallschaden[:\s]*([^\n,]{0,30})/i);
+    if (unfallMatch) {
+      const ctx = unfallMatch[1].toLowerCase().trim();
+      if (ctx.startsWith('ja') || ctx.includes('vorhanden') || ctx.startsWith('yes')) return true;
+      // If it says "nein", "kein", "ohne" — no damage
+      if (ctx.startsWith('nein') || ctx.includes('kein') || ctx.startsWith('ohne')) return false;
+      // Bare "Unfallschaden" in listing badge = has damage
+      if (ctx === '' || ctx === ':') return true;
+    }
+    return false;
+  })();
 
   return {
     externalId,
@@ -176,6 +189,7 @@ function parseListingElement(
     power,
     sellerType,
     location: location || '',
+    country: 'DE', // mobile.de is a German marketplace
     listingUrl,
     imageUrl,
     vatDeductible,

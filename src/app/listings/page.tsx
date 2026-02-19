@@ -31,6 +31,7 @@ interface ListingRow {
     power: string | null;
     sellerType: string | null;
     location: string | null;
+    country: string | null;
     listingUrl: string;
     vatDeductible: boolean | null;
     hasAccidentDamage: boolean | null;
@@ -53,6 +54,23 @@ function SortIcon({ col, current, order }: { col: SortKey; current: SortKey; ord
   return order === "asc"
     ? <ChevronUp className="ml-1 h-3 w-3 inline" />
     : <ChevronDown className="ml-1 h-3 w-3 inline" />;
+}
+
+const COUNTRY_FLAG: Record<string, string> = {
+  DE: "🇩🇪", AT: "🇦🇹", CH: "🇨🇭", FR: "🇫🇷", IT: "🇮🇹",
+  NL: "🇳🇱", BE: "🇧🇪", ES: "🇪🇸", PT: "🇵🇹", PL: "🇵🇱",
+  GB: "🇬🇧", SE: "🇸🇪", DK: "🇩🇰", NO: "🇳🇴", FI: "🇫🇮",
+};
+
+function CountryCell({ country }: { country: string | null }) {
+  const code = (country || "DE").toUpperCase();
+  const flag = COUNTRY_FLAG[code] ?? "🌍";
+  return (
+    <span className="inline-flex items-center gap-1 text-xs font-medium tabular-nums">
+      <span>{flag}</span>
+      <span className="text-muted-foreground">{code}</span>
+    </span>
+  );
 }
 
 function ScoreRing({ score }: { score: number }) {
@@ -132,7 +150,7 @@ export default function ListingsPage() {
     </th>
   );
 
-  const COLS = 9;
+  const COLS = 10;
 
   return (
     <div className="space-y-4">
@@ -178,6 +196,8 @@ export default function ListingsPage() {
                 {/* Flags — not sortable */}
                 <th className="h-9 px-4 text-xs font-medium text-muted-foreground text-center whitespace-nowrap">Flags</th>
                 <Th col="margin" label="Est. Margin" right />
+                {/* Country — not sortable */}
+                <th className="h-9 px-4 text-xs font-medium text-muted-foreground text-left whitespace-nowrap">Country</th>
                 <th className="h-9 w-9 px-2" />
               </tr>
             </thead>
@@ -307,6 +327,11 @@ export default function ListingsPage() {
                       ) : (
                         <span className="text-xs text-muted-foreground">—</span>
                       )}
+                    </td>
+
+                    {/* Country */}
+                    <td className="px-4 py-2.5 whitespace-nowrap">
+                      <CountryCell country={l.country} />
                     </td>
 
                     {/* External link */}

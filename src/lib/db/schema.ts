@@ -33,6 +33,7 @@ export const listings = pgTable('listings', {
   sellerType: text('seller_type'),
   sellerName: text('seller_name'),
   location: text('location'),
+  country: text('country').default('DE'),
   listingUrl: text('listing_url').notNull(),
   imageUrl: text('image_url'),
   bodyType: text('body_type'),

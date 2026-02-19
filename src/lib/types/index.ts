@@ -11,6 +11,7 @@ export interface RawListing {
   sellerType: 'dealer' | 'private';
   sellerName?: string;
   location: string;
+  country?: string;
   listingUrl: string;
   imageUrl?: string;
   bodyType?: string;
