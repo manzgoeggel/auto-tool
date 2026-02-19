@@ -63,6 +63,10 @@ export const scores = pgTable('scores', {
   aiExplanation: text('ai_explanation'),
   redFlags: jsonb('red_flags').$type<string[]>().default([]),
   highlights: jsonb('highlights').$type<string[]>().default([]),
+  specScore: real('spec_score'),
+  keySpecs: jsonb('key_specs').$type<{ spec: string; impact: 'high' | 'medium' | 'low'; note: string }[]>().default([]),
+  missingSpecs: jsonb('missing_specs').$type<string[]>().default([]),
+  variantClassification: text('variant_classification'),
   scoredAt: timestamp('scored_at').defaultNow(),
 });
 

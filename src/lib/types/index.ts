@@ -104,11 +104,21 @@ export interface HeuristicFactors {
   total: number;
 }
 
+export interface SpecDetail {
+  spec: string;
+  impact: 'high' | 'medium' | 'low';
+  note: string;
+}
+
 export interface AIAnalysis {
   score: number;
   explanation: string;
   redFlags: string[];
   highlights: string[];
+  specScore: number;
+  keySpecs: SpecDetail[];
+  missingSpecs: string[];
+  variantClassification: string;
 }
 
 export interface MarketBenchmark {

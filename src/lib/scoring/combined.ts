@@ -37,6 +37,10 @@ export async function scoreAndSaveListing(
     explanation: 'AI analysis pending',
     redFlags: [] as string[],
     highlights: [] as string[],
+    specScore: 50,
+    keySpecs: [] as { spec: string; impact: 'high' | 'medium' | 'low'; note: string }[],
+    missingSpecs: [] as string[],
+    variantClassification: '',
   };
 
   if (!skipAI && process.env.OPENAI_API_KEY) {
@@ -89,5 +93,9 @@ export async function scoreAndSaveListing(
     aiExplanation: aiAnalysis.explanation,
     redFlags: aiAnalysis.redFlags,
     highlights: aiAnalysis.highlights,
+    specScore: aiAnalysis.specScore,
+    keySpecs: aiAnalysis.keySpecs,
+    missingSpecs: aiAnalysis.missingSpecs,
+    variantClassification: aiAnalysis.variantClassification,
   });
 }
