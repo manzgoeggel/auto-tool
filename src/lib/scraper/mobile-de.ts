@@ -1,6 +1,5 @@
 import { buildSearchUrl } from './url-builder';
 import { parseSearchResults } from './parser';
-import { parseDetailPage } from './detail-parser';
 import { USER_AGENTS } from '@/lib/constants';
 import type { SearchConfig } from '@/lib/db/schema';
 import type { RawListing } from '@/lib/types';
@@ -148,33 +147,11 @@ export async function scrapeMobileDe(
     `Scrape complete: ${deduped.length} unique listings (${newListings.length} new, ${knownListings.length} already known). Fetching detail pages for new ones...`,
   );
 
-  // Enrich only NEW listings with detail page data (VAT, description, features, etc.)
-  const DETAIL_BATCH = 5;
-  for (let i = 0; i < newListings.length; i += DETAIL_BATCH) {
-    const batch = newListings.slice(i, i + DETAIL_BATCH);
-    await Promise.all(
-      batch.map(async (listing) => {
-        try {
-          const html = await fetchWithRetry(listing.listingUrl, 2);
-          const detail = parseDetailPage(html);
-          listing.vatDeductible = detail.vatDeductible || listing.vatDeductible;
-          listing.hasAccidentDamage = detail.hasAccidentDamage || listing.hasAccidentDamage;
-          if (detail.description) listing.description = detail.description;
-          if (detail.features && detail.features.length > 0) listing.features = detail.features;
-          if (detail.sellerName) listing.sellerName = detail.sellerName;
-          if (detail.color) listing.color = detail.color;
-          if (detail.bodyType) listing.bodyType = detail.bodyType;
-        } catch (err) {
-          console.warn(`Could not fetch detail page for ${listing.externalId}:`, err);
-        }
-      }),
-    );
-    if (i + DETAIL_BATCH < newListings.length) {
-      await delay(1000 + Math.random() * 1000);
-    }
-  }
+  // NOTE: Detail page enrichment (VAT, description, features, country) is intentionally
+  // NOT done here during scraping to avoid Vercel function timeouts.
+  // Use the separate "Enrich Listings" action in Settings after scraping.
 
-  console.log(`Detail enrichment complete. ${newListings.length} new + ${knownListings.length} updated (price/mileage only).`);
+  console.log(`Scrape complete. ${newListings.length} new listings saved (without detail enrichment). Run "Enrich Listings" to fetch VAT/details.`);
 
   return {
     listings: deduped,

@@ -6,6 +6,9 @@ import { parseDetailPage } from '@/lib/scraper/detail-parser';
 
 export const maxDuration = 300;
 
+// Per-listing fetch timeout (25s) — ScraperAPI can be slow but shouldn't hang forever
+const FETCH_TIMEOUT_MS = 25_000;
+
 function buildProxiedUrl(url: string): string {
   const apiKey = process.env.SCRAPER_API_KEY;
   if (!apiKey) throw new Error('SCRAPER_API_KEY is not set');
@@ -13,14 +16,21 @@ function buildProxiedUrl(url: string): string {
 }
 
 async function fetchDetail(url: string): Promise<string> {
-  const res = await fetch(buildProxiedUrl(url), {
-    headers: {
-      'Accept-Language': 'de-DE,de;q=0.9',
-      'Accept': 'text/html,application/xhtml+xml',
-    },
-  });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.text();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  try {
+    const res = await fetch(buildProxiedUrl(url), {
+      signal: controller.signal,
+      headers: {
+        'Accept-Language': 'de-DE,de;q=0.9',
+        'Accept': 'text/html,application/xhtml+xml',
+      },
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.text();
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export async function POST() {
@@ -34,8 +44,8 @@ export async function POST() {
     let enriched = 0;
     let errors = 0;
 
-    // Process in batches of 5 in parallel
-    const BATCH_SIZE = 5;
+    // Process in batches of 3 in parallel (ScraperAPI concurrency-friendly)
+    const BATCH_SIZE = 3;
     for (let i = 0; i < allListings.length; i += BATCH_SIZE) {
       const batch = allListings.slice(i, i + BATCH_SIZE);
       await Promise.all(
@@ -62,9 +72,9 @@ export async function POST() {
           }
         }),
       );
-      // Delay between batches
+      // Delay between batches to avoid hammering ScraperAPI
       if (i + BATCH_SIZE < allListings.length) {
-        await new Promise((r) => setTimeout(r, 1500));
+        await new Promise((r) => setTimeout(r, 2000));
       }
     }
 

@@ -116,7 +116,7 @@ export default function SettingsPage() {
         const newCount = data.results?.reduce(
           (sum: number, r: { newCount?: number }) => sum + (r.newCount || 0), 0,
         );
-        toast.success(`Scrape complete: ${totalFound} listings (${newCount} new)`);
+        toast.success(`Scrape complete: ${totalFound} listings (${newCount} new). Run "Enrich Listings" next to fetch VAT & details.`);
       } else {
         toast.error("Scrape failed: " + (data.error || "Unknown error"));
       }
