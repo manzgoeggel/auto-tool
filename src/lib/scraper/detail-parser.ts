@@ -1,4 +1,5 @@
 import { load } from 'cheerio';
+import { getVatRateForCountry } from '@/lib/constants';
 
 export interface DetailPageData {
   vatDeductible: boolean;
@@ -8,22 +9,53 @@ export interface DetailPageData {
   sellerName?: string;
   color?: string;
   bodyType?: string;
+  country?: string;
+  sourceVatRate?: number;
 }
 
 export function parseDetailPage(html: string): DetailPageData {
   const $ = load(html);
   const allText = $.text();
 
-  // VAT deductible — look for all known patterns from detail pages
+  // --- Country detection ---
+  // Try structured data first (schema.org, meta tags, data attributes)
+  const countryCode = detectCountry($, allText);
+  const sourceVatRate = getVatRateForCountry(countryCode);
+
+  // VAT deductible — look for all known patterns from detail pages (DE, AT, FR, NL, IT, ES, etc.)
   const vatDeductible =
+    // German patterns
     allText.includes('MwSt. ausweisbar') ||
     allText.includes('MwSt. ausw.') ||
     allText.includes('zzgl. MwSt') ||
     allText.includes('zzgl. gesetzlicher MwSt') ||
     /\(Netto\)/.test(allText) ||
-    /\d+\s*%\s*MwSt/.test(allText) ||                 // "19% MwSt" / "20% MwSt"
+    /\d+\s*%\s*MwSt/.test(allText) ||
     allText.includes('Mehrwertsteuer ausweisbar') ||
     allText.includes('Nettopreis') ||
+    // French patterns
+    allText.includes('TVA récupérable') ||
+    allText.includes('HT (hors taxe)') ||
+    allText.includes('prix HT') ||
+    /\d+\s*%\s*TVA/.test(allText) ||
+    // Dutch / Belgian patterns
+    allText.includes('BTW verrekenbaar') ||
+    allText.includes('ex. BTW') ||
+    allText.includes('excl. BTW') ||
+    /\d+\s*%\s*BTW/.test(allText) ||
+    // Italian patterns
+    allText.includes('IVA detraibile') ||
+    allText.includes('IVA recuperabile') ||
+    allText.includes('+ IVA') ||
+    allText.includes('iva escl') ||
+    /\d+\s*%\s*IVA/.test(allText) ||
+    // Spanish patterns
+    allText.includes('IVA deducible') ||
+    allText.includes('sin IVA') ||
+    // Polish patterns
+    allText.includes('VAT do odliczenia') ||
+    allText.includes('netto VAT') ||
+    // Generic EU indicator via DOM
     $('[data-testid*="vat"], [class*="vat"], [class*="mwst"]').length > 0;
 
   // Accident damage — use targeted approach to avoid false positives from "kein Unfallschaden" etc.
@@ -106,5 +138,84 @@ export function parseDetailPage(html: string): DetailPageData {
     sellerName,
     color,
     bodyType,
+    country: countryCode || undefined,
+    sourceVatRate,
   };
+}
+
+/**
+ * Attempt to detect the seller's country from the detail page HTML.
+ * Returns a 2-letter ISO country code or null.
+ */
+function detectCountry($: ReturnType<typeof load>, allText: string): string | null {
+  // 1. Explicit data attributes / meta tags often found on mobile.de international pages
+  const metaCountry = $('meta[name="country"], meta[property="og:country-name"]').attr('content');
+  if (metaCountry) {
+    const code = isoFromName(metaCountry);
+    if (code) return code;
+  }
+
+  // 2. Look for a "Standort" (location) line with a country code prefix like "AT-" or "IT-"
+  const standortMatch = allText.match(/Standort[:\s]+([A-Z]{2})-\d{4,5}/);
+  if (standortMatch) return standortMatch[1];
+
+  // 3. mobile.de sometimes embeds the country in the seller address block
+  const addressMatch = allText.match(/\b(AT|FR|IT|NL|BE|ES|PT|PL|SE|DK|FI|CZ|HU|RO|HR|SK|SI|BG|EE|LV|LT|LU|MT|CY|GR|IE|GB|NO|DE)\s*\n/);
+  if (addressMatch) return addressMatch[1];
+
+  // 4. Zip-code heuristics
+  // Austrian 4-digit zip (e.g. 1010, 8020)
+  if (/\b[A-Z]{0,2}-?(1[0-9]{3}|[2-9][0-9]{3})\b/.test(allText) &&
+      /\bA-\d{4}\b/.test(allText)) return 'AT';
+
+  // Italian 5-digit zip preceded by "I-" or followed by Italian city names
+  if (/\bI-\d{5}\b/.test(allText)) return 'IT';
+
+  // French 5-digit zip preceded by "F-"
+  if (/\bF-\d{5}\b/.test(allText)) return 'FR';
+
+  // Dutch 4-digit + 2-letter zip (e.g. "1234 AB")
+  if (/\b\d{4}\s[A-Z]{2}\b/.test(allText)) return 'NL';
+
+  // Belgian: "B-" prefix
+  if (/\bB-\d{4}\b/.test(allText)) return 'BE';
+
+  // Spanish 5-digit zip preceded by "E-"
+  if (/\bE-\d{5}\b/.test(allText)) return 'ES';
+
+  // 5. Look for currency / language signals unique to certain countries
+  if (allText.includes('TVA') && !allText.includes('MwSt')) return 'FR';
+  if (/\bBTW\b/.test(allText) && !allText.includes('MwSt')) return 'NL';
+  if (/\bIVA\b/.test(allText) && !allText.includes('MwSt')) return 'IT';
+
+  // Default: no country detected (caller should fall back to 'DE' for mobile.de)
+  return null;
+}
+
+/** Map common country names to ISO codes */
+function isoFromName(name: string): string | null {
+  const map: Record<string, string> = {
+    germany: 'DE', deutschland: 'DE',
+    austria: 'AT', österreich: 'AT', oesterreich: 'AT',
+    france: 'FR', frankreich: 'FR',
+    italy: 'IT', italien: 'IT', italia: 'IT',
+    netherlands: 'NL', niederlande: 'NL', nederland: 'NL',
+    belgium: 'BE', belgien: 'BE',
+    spain: 'ES', spanien: 'ES', españa: 'ES',
+    portugal: 'PT',
+    poland: 'PL', polen: 'PL',
+    sweden: 'SE', schweden: 'SE',
+    denmark: 'DK', dänemark: 'DK',
+    finland: 'FI', finnland: 'FI',
+    czechia: 'CZ', 'czech republic': 'CZ', tschechien: 'CZ',
+    hungary: 'HU', ungarn: 'HU',
+    romania: 'RO', rumänien: 'RO',
+    croatia: 'HR', kroatien: 'HR',
+    slovakia: 'SK', slowakei: 'SK',
+    slovenia: 'SI', slowenien: 'SI',
+    norway: 'NO', norwegen: 'NO',
+    'united kingdom': 'GB', uk: 'GB', großbritannien: 'GB',
+    luxembourg: 'LU', luxemburg: 'LU',
+  };
+  return map[name.toLowerCase().trim()] ?? null;
 }

@@ -20,6 +20,7 @@ export interface RawListing {
   description?: string;
   vatDeductible?: boolean;
   hasAccidentDamage?: boolean;
+  sourceVatRate?: number;
 }
 
 export interface ScoredListing {

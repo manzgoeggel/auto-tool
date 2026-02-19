@@ -186,6 +186,45 @@ export const TRANSMISSIONS = Object.keys(TRANSMISSION_MAP);
 // Swiss import cost constants
 export const SWISS_VAT_RATE = 0.081; // 8.1%
 export const GERMAN_VAT_RATE = 0.19; // 19%
+
+/** Standard VAT rates by EU/EEA country code (as of 2024) */
+export const EU_VAT_RATES: Record<string, number> = {
+  DE: 0.19,
+  AT: 0.20,
+  FR: 0.20,
+  IT: 0.22,
+  NL: 0.21,
+  BE: 0.21,
+  ES: 0.21,
+  PT: 0.23,
+  PL: 0.23,
+  SE: 0.25,
+  DK: 0.25,
+  FI: 0.24,
+  NO: 0.25,
+  CZ: 0.21,
+  HU: 0.27,
+  RO: 0.19,
+  HR: 0.25,
+  SK: 0.20,
+  SI: 0.22,
+  BG: 0.20,
+  EE: 0.22,
+  LV: 0.21,
+  LT: 0.21,
+  LU: 0.17,
+  MT: 0.18,
+  CY: 0.19,
+  GR: 0.24,
+  IE: 0.23,
+  GB: 0.20,
+  CH: 0.081, // Switzerland (special case, buyer's country)
+};
+
+/** Return the source country's VAT rate, defaulting to DE (19%) if unknown */
+export function getVatRateForCountry(country: string | null | undefined): number {
+  return EU_VAT_RATES[(country ?? 'DE').toUpperCase()] ?? GERMAN_VAT_RATE;
+}
 export const AUTOMOBILE_TAX_RATE = 0.04; // 4%
 export const CUSTOMS_DUTY_PER_100KG = 15; // CHF 15 per 100kg
 export const DEFAULT_TRANSPORT_COST_CHF = 650;

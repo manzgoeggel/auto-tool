@@ -38,6 +38,7 @@ export async function upsertListing(listing: RawListing, configId?: number) {
         imageUrl: listing.imageUrl,
         vatDeductible: listing.vatDeductible,
         hasAccidentDamage: listing.hasAccidentDamage ?? false,
+        sourceVatRate: listing.sourceVatRate,
         priceHistory,
         lastSeenAt: new Date(),
         isActive: true,
@@ -72,6 +73,7 @@ export async function upsertListing(listing: RawListing, configId?: number) {
       description: listing.description,
       vatDeductible: listing.vatDeductible,
       hasAccidentDamage: listing.hasAccidentDamage ?? false,
+      sourceVatRate: listing.sourceVatRate,
       priceHistory: listing.priceEur
         ? [{ date: new Date().toISOString().split('T')[0], price: listing.priceEur }]
         : [],

@@ -1,4 +1,4 @@
-import { pgTable, serial, text, integer, real, boolean, timestamp, jsonb } from 'drizzle-orm/pg-core';
+import { pgTable, serial, text, integer, real, boolean, timestamp, jsonb, doublePrecision } from 'drizzle-orm/pg-core';
 
 export const searchConfigs = pgTable('search_configs', {
   id: serial('id').primaryKey(),
@@ -42,6 +42,7 @@ export const listings = pgTable('listings', {
   description: text('description'),
   vatDeductible: boolean('vat_deductible').default(false),
   hasAccidentDamage: boolean('has_accident_damage').default(false),
+  sourceVatRate: doublePrecision('source_vat_rate'),
   priceHistory: jsonb('price_history').$type<{ date: string; price: number }[]>().default([]),
   firstSeenAt: timestamp('first_seen_at').defaultNow(),
   lastSeenAt: timestamp('last_seen_at').defaultNow(),

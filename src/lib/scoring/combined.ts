@@ -6,7 +6,7 @@ import { calculateImportCosts } from '@/lib/import-costs/calculator';
 import { getEurChfRate } from '@/lib/import-costs/exchange-rate';
 import { getBenchmark } from '@/lib/db/queries/benchmarks';
 import { upsertScore } from '@/lib/db/queries/scores';
-import { SCORE_WEIGHTS, CH_RESALE_PREMIUM_FACTOR } from '@/lib/constants';
+import { SCORE_WEIGHTS, CH_RESALE_PREMIUM_FACTOR, getVatRateForCountry } from '@/lib/constants';
 
 export async function scoreAndSaveListing(
   listing: Listing,
@@ -56,13 +56,17 @@ export async function scoreAndSaveListing(
   // Price delta
   const priceDeltaPercent = computePriceDeltaPercent(listing, benchmark);
 
-  // Import costs
+  // Import costs — use per-country VAT rate if available
   const eurChfRate = await getEurChfRate();
+  const sourceVatRate = listing.sourceVatRate != null
+    ? listing.sourceVatRate
+    : getVatRateForCountry(listing.country);
   const importCosts = listing.priceEur
     ? calculateImportCosts({
         priceEur: listing.priceEur,
         isVatDeductible: listing.vatDeductible || false,
         eurChfRate,
+        sourceVatRate,
       })
     : null;
 

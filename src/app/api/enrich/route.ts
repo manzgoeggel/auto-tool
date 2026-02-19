@@ -51,8 +51,10 @@ export async function POST() {
               ...(detail.sellerName ? { sellerName: detail.sellerName } : {}),
               ...(detail.color ? { color: detail.color } : {}),
               ...(detail.bodyType ? { bodyType: detail.bodyType } : {}),
+              ...(detail.country ? { country: detail.country } : {}),
+              ...(detail.sourceVatRate != null ? { sourceVatRate: detail.sourceVatRate } : {}),
             }).where(eq(listings.id, listing.id));
-            console.log(`Enriched listing ${listing.externalId}: VAT=${detail.vatDeductible}`);
+            console.log(`Enriched listing ${listing.externalId}: VAT=${detail.vatDeductible}, country=${detail.country ?? 'DE'}`);
             enriched++;
           } catch (err) {
             console.warn(`Failed to enrich ${listing.externalId}:`, err);
