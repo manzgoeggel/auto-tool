@@ -156,6 +156,14 @@ function parseListingElement(
     allText.includes('MwSt. ausw.') ||
     allText.includes('Netto');
 
+  // Check for accident damage
+  const hasAccidentDamage =
+    allText.includes('Unfallschaden') ||
+    allText.includes('Unfallfahrzeug') ||
+    allText.includes('Karosserieschaden') ||
+    allText.includes('Totalschaden') ||
+    allText.includes('beschädigt');
+
   return {
     externalId,
     title,
@@ -171,6 +179,7 @@ function parseListingElement(
     listingUrl,
     imageUrl,
     vatDeductible,
+    hasAccidentDamage,
   };
 }
 

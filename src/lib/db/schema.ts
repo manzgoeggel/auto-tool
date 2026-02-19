@@ -40,6 +40,7 @@ export const listings = pgTable('listings', {
   features: jsonb('features').$type<string[]>(),
   description: text('description'),
   vatDeductible: boolean('vat_deductible').default(false),
+  hasAccidentDamage: boolean('has_accident_damage').default(false),
   priceHistory: jsonb('price_history').$type<{ date: string; price: number }[]>().default([]),
   firstSeenAt: timestamp('first_seen_at').defaultNow(),
   lastSeenAt: timestamp('last_seen_at').defaultNow(),

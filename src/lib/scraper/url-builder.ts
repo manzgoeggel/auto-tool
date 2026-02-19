@@ -29,7 +29,8 @@ export function buildSearchUrl(config: SearchConfig, page: number = 1): string {
         for (const model of brandModels) {
           const modelId = MOBILE_DE_MODEL_IDS[brand]?.[model];
           if (modelId) {
-            msValues.push(`${makeId};${modelId};;`);
+            // mobile.de ms format: makeId;;modelGroupId; (model ID is in position 3)
+            msValues.push(`${makeId};;${modelId};`);
           }
         }
       } else {

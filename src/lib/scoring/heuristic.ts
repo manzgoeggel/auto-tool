@@ -3,7 +3,7 @@ import type { Listing } from '@/lib/db/schema';
 import { AVERAGE_KM_PER_YEAR } from '@/lib/constants';
 
 export function computeHeuristicScore(
-  listing: Listing,
+  listing: Listing & { hasAccidentDamage?: boolean | null },
   benchmark: MarketBenchmark | null,
 ): HeuristicFactors {
   const priceVsMedian = scorePriceVsMedian(listing, benchmark);
@@ -12,12 +12,14 @@ export function computeHeuristicScore(
   const mileageAnomaly = scoreMileageAnomaly(listing);
   const priceDrop = scorePriceDrop(listing);
   const vatDeductibleScore = scoreVatDeductible(listing);
+  // Accident damage: hard penalty of -40 points
+  const accidentPenalty = listing.hasAccidentDamage ? -40 : 0;
 
   const total = Math.max(
     0,
     Math.min(
       100,
-      priceVsMedian + listingAge + sellerTypeScore + mileageAnomaly + priceDrop + vatDeductibleScore,
+      priceVsMedian + listingAge + sellerTypeScore + mileageAnomaly + priceDrop + vatDeductibleScore + accidentPenalty,
     ),
   );
 

@@ -39,6 +39,7 @@ export default function SettingsPage() {
   const [editingConfig, setEditingConfig] = useState<Config | null>(null);
   const [scraping, setScraping] = useState(false);
   const [scoring, setScoring] = useState(false);
+  const [enriching, setEnriching] = useState(false);
 
   const fetchConfigs = useCallback(async () => {
     try {
@@ -121,6 +122,23 @@ export default function SettingsPage() {
       toast.error("Scrape failed");
     } finally {
       setScraping(false);
+    }
+  };
+
+  const handleEnrich = async () => {
+    setEnriching(true);
+    try {
+      const res = await fetch("/api/enrich", { method: "POST" });
+      const data = await res.json();
+      if (res.ok) {
+        toast.success(`Enriched ${data.enriched}/${data.total} listings with detail page data`);
+      } else {
+        toast.error("Enrichment failed");
+      }
+    } catch {
+      toast.error("Enrichment failed");
+    } finally {
+      setEnriching(false);
     }
   };
 
@@ -217,6 +235,10 @@ export default function SettingsPage() {
               <Play className="mr-2 h-4 w-4" />
             )}
             {scraping ? "Scraping..." : "Run Scraper (All Configs)"}
+          </Button>
+          <Button variant="outline" onClick={handleEnrich} disabled={enriching}>
+            {enriching && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            {enriching ? "Enriching..." : "Enrich Listings (VAT + Details)"}
           </Button>
           <Button variant="outline" onClick={handleScore} disabled={scoring}>
             {scoring && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}

@@ -39,6 +39,7 @@ interface ListingRow {
     location: string | null;
     listingUrl: string;
     vatDeductible: boolean | null;
+    hasAccidentDamage: boolean | null;
     firstSeenAt: string | null;
   };
   score: {
@@ -46,6 +47,9 @@ interface ListingRow {
     estimatedMarginMinChf: number | null;
     estimatedMarginMaxChf: number | null;
     totalLandedCostChf: number | null;
+    aiExplanation: string | null;
+    redFlags: string[] | null;
+    highlights: string[] | null;
   } | null;
 }
 
@@ -169,6 +173,7 @@ export default function ListingsPage() {
                 <TableHead>Year</TableHead>
                 <TableHead>Fuel</TableHead>
                 <TableHead>Seller</TableHead>
+                <TableHead className="w-14 text-center">VAT</TableHead>
                 <TableHead className="text-right">Est. Margin</TableHead>
                 <TableHead>Seen</TableHead>
                 <TableHead className="w-10"></TableHead>
@@ -178,14 +183,14 @@ export default function ListingsPage() {
               {loading ? (
                 Array.from({ length: 10 }).map((_, i) => (
                   <TableRow key={i}>
-                    {Array.from({ length: 10 }).map((_, j) => (
+                    {Array.from({ length: 11 }).map((_, j) => (
                       <TableCell key={j}><Skeleton className="h-4 w-full" /></TableCell>
                     ))}
                   </TableRow>
                 ))
               ) : !data || data.listings.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={10} className="text-center py-12 text-muted-foreground">
+                  <TableCell colSpan={11} className="text-center py-12 text-muted-foreground">
                     No listings found. Run the scraper from Settings to populate data.
                   </TableCell>
                 </TableRow>
@@ -196,21 +201,28 @@ export default function ListingsPage() {
                   return (
                     <TableRow key={l.id} className="cursor-pointer hover:bg-muted/50">
                       <TableCell>
-                        {s?.combinedScore != null ? (
-                          <ScoreBadge score={s.combinedScore} size="sm" />
-                        ) : (
-                          <span className="text-xs text-muted-foreground">--</span>
-                        )}
+                        <div className="flex flex-col gap-1">
+                          {s?.combinedScore != null ? (
+                            <ScoreBadge score={s.combinedScore} size="sm" />
+                          ) : (
+                            <span className="text-xs text-muted-foreground">--</span>
+                          )}
+                        </div>
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="max-w-xs">
                         <Link href={`/listings/${l.id}`} className="font-medium hover:underline line-clamp-1">
                           {l.title}
                         </Link>
-                        <div className="flex gap-1 mt-0.5">
-                          {l.vatDeductible && (
-                            <Badge variant="secondary" className="text-[10px] bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">VAT</Badge>
-                          )}
-                        </div>
+                        {s?.aiExplanation && s.aiExplanation !== 'AI analysis pending' && (
+                          <p className="text-[11px] text-muted-foreground line-clamp-1 mt-0.5">{s.aiExplanation}</p>
+                        )}
+                        {(s?.redFlags?.length ?? 0) > 0 && (
+                          <div className="flex flex-wrap gap-0.5 mt-0.5">
+                            {s!.redFlags!.slice(0, 2).map((f, i) => (
+                              <span key={i} className="text-[10px] text-red-500">⚠ {f}</span>
+                            ))}
+                          </div>
+                        )}
                       </TableCell>
                       <TableCell className="text-right font-medium">
                         {l.priceEur ? formatPrice(l.priceEur, "EUR") : "N/A"}
@@ -224,6 +236,15 @@ export default function ListingsPage() {
                         <Badge variant={l.sellerType === "private" ? "default" : "secondary"} className="text-xs">
                           {l.sellerType || "N/A"}
                         </Badge>
+                      </TableCell>
+                      <TableCell className="text-center">
+                        {l.vatDeductible ? (
+                          <Badge className="text-[10px] bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20">
+                            VAT ✓
+                          </Badge>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">—</span>
+                        )}
                       </TableCell>
                       <TableCell className="text-right">
                         {s?.estimatedMarginMinChf != null ? (

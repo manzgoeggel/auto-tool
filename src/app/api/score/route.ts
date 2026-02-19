@@ -30,13 +30,20 @@ export async function POST(request: NextRequest) {
     let scored = 0;
     let errors = 0;
 
-    for (const listing of unscored) {
-      try {
-        await scoreAndSaveListing(listing, skipAI);
-        scored++;
-      } catch (err) {
-        console.error(`Failed to score listing ${listing.id}:`, err);
-        errors++;
+    // Process in batches of 5 in parallel to speed up scoring
+    const BATCH_SIZE = 5;
+    for (let i = 0; i < unscored.length; i += BATCH_SIZE) {
+      const batch = unscored.slice(i, i + BATCH_SIZE);
+      const results = await Promise.allSettled(
+        batch.map((listing) => scoreAndSaveListing(listing, skipAI)),
+      );
+      for (const result of results) {
+        if (result.status === 'fulfilled') {
+          scored++;
+        } else {
+          console.error('Failed to score listing:', result.reason);
+          errors++;
+        }
       }
     }
 

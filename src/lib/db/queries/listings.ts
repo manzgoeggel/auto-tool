@@ -36,6 +36,7 @@ export async function upsertListing(listing: RawListing, configId?: number) {
         location: listing.location,
         imageUrl: listing.imageUrl,
         vatDeductible: listing.vatDeductible,
+        hasAccidentDamage: listing.hasAccidentDamage ?? false,
         priceHistory,
         lastSeenAt: new Date(),
         isActive: true,
@@ -68,6 +69,7 @@ export async function upsertListing(listing: RawListing, configId?: number) {
       features: listing.features,
       description: listing.description,
       vatDeductible: listing.vatDeductible,
+      hasAccidentDamage: listing.hasAccidentDamage ?? false,
       priceHistory: listing.priceEur
         ? [{ date: new Date().toISOString().split('T')[0], price: listing.priceEur }]
         : [],
@@ -136,7 +138,7 @@ export async function getListingsWithScores(filters: {
 
   return {
     listings: results.map((r) => ({
-      ...r.listings,
+      listings: r.listings,
       score: r.scores,
     })),
     total: Number(countResult[0].count),

@@ -35,6 +35,19 @@ export async function POST(request: NextRequest) {
       try {
         const scrapeResult = await scrapeMobileDe(config, 10);
 
+        console.log(`\n=== Scraped listings for config "${config.name}" ===`);
+        scrapeResult.listings.forEach((l, i) => {
+          console.log(`[${i + 1}] ${l.title}`);
+          console.log(`    ID: ${l.externalId}`);
+          console.log(`    Price: ${l.priceEur} EUR | Mileage: ${l.mileageKm} km | Year: ${l.firstRegistrationYear}/${l.firstRegistrationMonth}`);
+          console.log(`    Fuel: ${l.fuelType} | Transmission: ${l.transmission} | Power: ${l.power}`);
+          console.log(`    Seller: ${l.sellerType} | Location: ${l.location}`);
+          console.log(`    VAT deductible: ${l.vatDeductible}`);
+          console.log(`    URL: ${l.listingUrl}`);
+          console.log('');
+        });
+        console.log(`=== Total: ${scrapeResult.listings.length} listings ===\n`);
+
         let upserted = 0;
         for (const listing of scrapeResult.listings) {
           try {

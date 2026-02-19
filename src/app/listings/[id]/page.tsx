@@ -20,6 +20,7 @@ import { Separator } from "@/components/ui/separator";
 import { ScoreBadge } from "@/components/score-badge";
 import { ImportCalculator } from "@/components/import-calculator";
 import { formatPrice, formatMileage, timeAgo } from "@/lib/format";
+import { calculateImportCosts } from "@/lib/import-costs/calculator";
 
 async function getListing(id: number) {
   try {
@@ -57,6 +58,23 @@ export default async function ListingDetailPage({
 
   const score = listing.score;
   const priceChf = listing.priceEur ? Math.round(listing.priceEur * eurChfRate) : null;
+
+  // Always compute landed cost live so it matches the Import Calculator exactly
+  const liveLandedCostChf = listing.priceEur
+    ? calculateImportCosts({
+        priceEur: listing.priceEur,
+        isVatDeductible: listing.vatDeductible || false,
+        eurChfRate,
+      }).grandTotalChf
+    : null;
+
+  // Recompute margins using live landed cost
+  const liveMarginMin = liveLandedCostChf != null && score?.estimatedResaleMinChf != null
+    ? score.estimatedResaleMinChf - liveLandedCostChf
+    : null;
+  const liveMarginMax = liveLandedCostChf != null && score?.estimatedResaleMaxChf != null
+    ? score.estimatedResaleMaxChf - liveLandedCostChf
+    : null;
 
   const specs = [
     { icon: Calendar, label: "Year", value: listing.firstRegistrationYear?.toString() },
@@ -180,18 +198,16 @@ export default async function ListingDetailPage({
             </CardHeader>
             <CardContent className="space-y-3">
               <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Landed cost</span>
+                <span className="text-muted-foreground">Landed cost (incl. all fees)</span>
                 <span className="font-medium">
-                  {score.totalLandedCostChf != null
-                    ? formatPrice(score.totalLandedCostChf, "CHF")
-                    : "N/A"}
+                  {liveLandedCostChf != null ? formatPrice(liveLandedCostChf, "CHF") : "N/A"}
                 </span>
               </div>
               <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Est. resale range</span>
+                <span className="text-muted-foreground">Est. Swiss resale range</span>
                 <span className="font-medium">
                   {score.estimatedResaleMinChf != null && score.estimatedResaleMaxChf != null
-                    ? `${formatPrice(score.estimatedResaleMinChf, "CHF")} - ${formatPrice(score.estimatedResaleMaxChf, "CHF")}`
+                    ? `${formatPrice(score.estimatedResaleMinChf, "CHF")} – ${formatPrice(score.estimatedResaleMaxChf, "CHF")}`
                     : "N/A"}
                 </span>
               </div>
@@ -200,13 +216,13 @@ export default async function ListingDetailPage({
                 <span className="font-semibold">Est. margin</span>
                 <span
                   className={
-                    score.estimatedMarginMinChf != null && score.estimatedMarginMinChf > 0
+                    liveMarginMin != null && liveMarginMin > 0
                       ? "font-bold text-emerald-600 dark:text-emerald-400"
                       : "font-bold text-red-600 dark:text-red-400"
                   }
                 >
-                  {score.estimatedMarginMinChf != null && score.estimatedMarginMaxChf != null
-                    ? `${formatPrice(score.estimatedMarginMinChf, "CHF")} - ${formatPrice(score.estimatedMarginMaxChf, "CHF")}`
+                  {liveMarginMin != null && liveMarginMax != null
+                    ? `${formatPrice(liveMarginMin, "CHF")} – ${formatPrice(liveMarginMax, "CHF")}`
                     : "N/A"}
                 </span>
               </div>
