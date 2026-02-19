@@ -117,6 +117,7 @@ export async function getListingsWithScores(filters: {
     : sortBy === 'mileage' ? listings.mileageKm
     : sortBy === 'year' ? listings.firstRegistrationYear
     : sortBy === 'first_seen' ? listings.firstSeenAt
+    : sortBy === 'margin' ? scores.estimatedMarginMinChf
     : scores.combinedScore;
 
   const orderDir = sortOrder === 'asc' ? sql`ASC NULLS LAST` : sql`DESC NULLS LAST`;
