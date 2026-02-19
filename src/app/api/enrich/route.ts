@@ -6,13 +6,13 @@ import { parseDetailPage } from '@/lib/scraper/detail-parser';
 
 export const maxDuration = 300;
 
-// Per-listing fetch timeout (25s) — ScraperAPI can be slow but shouldn't hang forever
-const FETCH_TIMEOUT_MS = 25_000;
+// Per-listing fetch timeout (60s) — render=true uses headless Chrome, takes 10-20s per request
+const FETCH_TIMEOUT_MS = 60_000;
 
 function buildProxiedUrl(url: string): string {
   const apiKey = process.env.SCRAPER_API_KEY;
   if (!apiKey) throw new Error('SCRAPER_API_KEY is not set');
-  return `https://api.scraperapi.com?api_key=${apiKey}&url=${encodeURIComponent(url)}&country_code=de`;
+  return `https://api.scraperapi.com?api_key=${apiKey}&url=${encodeURIComponent(url)}&country_code=de&render=true&premium=true`;
 }
 
 async function fetchDetail(url: string): Promise<string> {

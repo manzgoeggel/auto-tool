@@ -17,7 +17,10 @@ function buildProxiedUrl(url: string): string {
   if (!apiKey) {
     throw new Error('SCRAPER_API_KEY is not set');
   }
-  return `https://api.scraperapi.com?api_key=${apiKey}&url=${encodeURIComponent(url)}&country_code=de`;
+  // render=true  → headless Chrome (handles JS-heavy pages and Cloudflare)
+  // premium=true → residential proxies (bypasses IP blocks on mobile.de)
+  // country_code=de → German exit node for localised content
+  return `https://api.scraperapi.com?api_key=${apiKey}&url=${encodeURIComponent(url)}&country_code=de&render=true&premium=true`;
 }
 
 async function fetchWithRetry(
@@ -35,19 +38,20 @@ async function fetchWithRetry(
       });
 
       if (res.status === 429) {
-        const waitTime = Math.pow(2, attempt + 1) * 5000;
+        const waitTime = Math.pow(2, attempt + 1) * 10000;
         console.warn(`Rate limited, waiting ${waitTime}ms before retry ${attempt + 1}`);
         await delay(waitTime);
         continue;
       }
 
-      if (res.status === 403) {
-        console.warn(`Access forbidden (attempt ${attempt + 1}/${retries})`);
+      if (res.status === 403 || res.status === 500) {
+        // 500 from ScraperAPI = target blocked the request; retry with longer back-off
+        console.warn(`ScraperAPI returned ${res.status} (attempt ${attempt + 1}/${retries}) — retrying`);
         if (attempt < retries - 1) {
-          await delay(5000 + Math.random() * 5000);
+          await delay(10000 + Math.random() * 5000);
           continue;
         }
-        throw new Error('Access forbidden by mobile.de - may need to adjust scraping approach');
+        throw new Error(`ScraperAPI ${res.status} after ${retries} attempts — mobile.de is blocking`);
       }
 
       if (!res.ok) {
@@ -112,9 +116,9 @@ export async function scrapeMobileDe(
         `Page ${page - 1}: found ${result.listings.length} listings (total: ${allListings.length})`,
       );
 
-      // Rate limiting: random delay between 2-4 seconds
+      // Rate limiting: random delay between 3-6 seconds (render=true requests are slower)
       if (hasMorePages && page <= maxPages) {
-        const waitMs = 2000 + Math.random() * 2000;
+        const waitMs = 3000 + Math.random() * 3000;
         await delay(waitMs);
       }
     } catch (error) {
