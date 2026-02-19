@@ -6,8 +6,12 @@ export async function GET() {
     const configs = await getAllConfigs();
     return NextResponse.json(configs);
   } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
     console.error('Failed to fetch configs:', error);
-    return NextResponse.json({ error: 'Failed to fetch configs' }, { status: 500 });
+    return NextResponse.json(
+      { error: 'Failed to fetch configs', detail: process.env.NODE_ENV === 'development' ? message : undefined },
+      { status: 500 }
+    );
   }
 }
 
@@ -17,8 +21,12 @@ export async function POST(request: NextRequest) {
     const config = await createConfig(data);
     return NextResponse.json(config, { status: 201 });
   } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
     console.error('Failed to create config:', error);
-    return NextResponse.json({ error: 'Failed to create config' }, { status: 500 });
+    return NextResponse.json(
+      { error: 'Failed to create config', detail: process.env.NODE_ENV === 'development' ? message : undefined },
+      { status: 500 }
+    );
   }
 }
 
