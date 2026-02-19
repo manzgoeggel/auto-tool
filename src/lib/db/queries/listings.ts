@@ -193,3 +193,9 @@ export async function getUnscoredListings() {
 export async function getAllActiveListings() {
   return db.select().from(listings).where(eq(listings.isActive, true));
 }
+
+/** Returns a Set of externalIds that are already in the DB (active or inactive). */
+export async function getExistingExternalIds(): Promise<Set<string>> {
+  const rows = await db.select({ externalId: listings.externalId }).from(listings);
+  return new Set(rows.map((r) => r.externalId));
+}

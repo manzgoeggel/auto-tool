@@ -70,8 +70,11 @@ async function fetchWithRetry(
 export async function scrapeMobileDe(
   config: SearchConfig,
   maxPages: number = 10,
+  existingIds: Set<string> = new Set(),
 ): Promise<{
   listings: RawListing[];
+  newCount: number;
+  updatedCount: number;
   totalResults?: number;
   pagesScraped: number;
   errors: string[];
@@ -82,7 +85,7 @@ export async function scrapeMobileDe(
   let hasMorePages = true;
   let totalResults: number | undefined;
 
-  console.log(`Starting scrape for config: ${config.name}`);
+  console.log(`Starting scrape for config: ${config.name} (${existingIds.size} known IDs to skip detail fetch)`);
 
   while (hasMorePages && page <= maxPages) {
     try {
@@ -110,9 +113,9 @@ export async function scrapeMobileDe(
         `Page ${page - 1}: found ${result.listings.length} listings (total: ${allListings.length})`,
       );
 
-      // Rate limiting: random delay between 2-5 seconds
+      // Rate limiting: random delay between 2-4 seconds
       if (hasMorePages && page <= maxPages) {
-        const waitMs = 2000 + Math.random() * 3000;
+        const waitMs = 2000 + Math.random() * 2000;
         await delay(waitMs);
       }
     } catch (error) {
@@ -129,7 +132,7 @@ export async function scrapeMobileDe(
     }
   }
 
-  // Deduplicate by externalId
+  // Deduplicate within this scrape run by externalId
   const seen = new Set<string>();
   const deduped = allListings.filter((l) => {
     if (seen.has(l.externalId)) return false;
@@ -137,21 +140,23 @@ export async function scrapeMobileDe(
     return true;
   });
 
+  // Split into new (need detail fetch) and already-known (skip detail fetch)
+  const newListings = deduped.filter((l) => !existingIds.has(l.externalId));
+  const knownListings = deduped.filter((l) => existingIds.has(l.externalId));
+
   console.log(
-    `Scrape complete: ${deduped.length} unique listings from ${page - 1} pages. Fetching detail pages...`,
+    `Scrape complete: ${deduped.length} unique listings (${newListings.length} new, ${knownListings.length} already known). Fetching detail pages for new ones...`,
   );
 
-  // Enrich listings with detail page data (VAT, description, features, etc.)
-  // Process in batches of 5 in parallel to stay within rate limits
+  // Enrich only NEW listings with detail page data (VAT, description, features, etc.)
   const DETAIL_BATCH = 5;
-  for (let i = 0; i < deduped.length; i += DETAIL_BATCH) {
-    const batch = deduped.slice(i, i + DETAIL_BATCH);
+  for (let i = 0; i < newListings.length; i += DETAIL_BATCH) {
+    const batch = newListings.slice(i, i + DETAIL_BATCH);
     await Promise.all(
       batch.map(async (listing) => {
         try {
           const html = await fetchWithRetry(listing.listingUrl, 2);
           const detail = parseDetailPage(html);
-          // Detail page overrides search result card where it has better data
           listing.vatDeductible = detail.vatDeductible || listing.vatDeductible;
           listing.hasAccidentDamage = detail.hasAccidentDamage || listing.hasAccidentDamage;
           if (detail.description) listing.description = detail.description;
@@ -164,16 +169,17 @@ export async function scrapeMobileDe(
         }
       }),
     );
-    // Small delay between detail batches
-    if (i + DETAIL_BATCH < deduped.length) {
+    if (i + DETAIL_BATCH < newListings.length) {
       await delay(1000 + Math.random() * 1000);
     }
   }
 
-  console.log(`Detail enrichment complete for ${deduped.length} listings`);
+  console.log(`Detail enrichment complete. ${newListings.length} new + ${knownListings.length} updated (price/mileage only).`);
 
   return {
     listings: deduped,
+    newCount: newListings.length,
+    updatedCount: knownListings.length,
     totalResults,
     pagesScraped: page - 1,
     errors,

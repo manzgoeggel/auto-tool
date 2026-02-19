@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getActiveConfigs, getConfigById } from '@/lib/db/queries/configs';
 import { scrapeMobileDe } from '@/lib/scraper/mobile-de';
-import { upsertListing } from '@/lib/db/queries/listings';
+import { upsertListing, getExistingExternalIds } from '@/lib/db/queries/listings';
 
 export const maxDuration = 300;
 
@@ -9,6 +9,8 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json().catch(() => ({}));
     const configId = body.configId;
+    // Allow caller to control how many pages to fetch (default 20, max 50)
+    const maxPages = Math.min(parseInt(body.maxPages || '20', 10), 50);
 
     let configs;
     if (configId) {
@@ -29,24 +31,27 @@ export async function POST(request: NextRequest) {
       });
     }
 
+    // Load all known IDs once up front so we can skip detail fetches for them
+    const existingIds = await getExistingExternalIds();
+    console.log(`Loaded ${existingIds.size} existing listing IDs from DB`);
+
     const results = [];
 
     for (const config of configs) {
       try {
-        const scrapeResult = await scrapeMobileDe(config, 10);
+        const scrapeResult = await scrapeMobileDe(config, maxPages, existingIds);
 
         console.log(`\n=== Scraped listings for config "${config.name}" ===`);
         scrapeResult.listings.forEach((l, i) => {
-          console.log(`[${i + 1}] ${l.title}`);
+          const isNew = !existingIds.has(l.externalId);
+          console.log(`[${i + 1}] ${isNew ? '★ NEW' : '  ↺'} ${l.title}`);
           console.log(`    ID: ${l.externalId}`);
           console.log(`    Price: ${l.priceEur} EUR | Mileage: ${l.mileageKm} km | Year: ${l.firstRegistrationYear}/${l.firstRegistrationMonth}`);
           console.log(`    Fuel: ${l.fuelType} | Transmission: ${l.transmission} | Power: ${l.power}`);
-          console.log(`    Seller: ${l.sellerType} | Location: ${l.location}`);
           console.log(`    VAT deductible: ${l.vatDeductible}`);
-          console.log(`    URL: ${l.listingUrl}`);
           console.log('');
         });
-        console.log(`=== Total: ${scrapeResult.listings.length} listings ===\n`);
+        console.log(`=== Total: ${scrapeResult.listings.length} (${scrapeResult.newCount} new, ${scrapeResult.updatedCount} updated) ===\n`);
 
         let upserted = 0;
         for (const listing of scrapeResult.listings) {
@@ -62,6 +67,8 @@ export async function POST(request: NextRequest) {
           configId: config.id,
           configName: config.name,
           totalFound: scrapeResult.listings.length,
+          newCount: scrapeResult.newCount,
+          updatedCount: scrapeResult.updatedCount,
           upserted,
           pagesScraped: scrapeResult.pagesScraped,
           totalResults: scrapeResult.totalResults,
