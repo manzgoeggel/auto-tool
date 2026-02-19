@@ -1,6 +1,6 @@
 import { db } from '../index';
 import { searchConfigs } from '../schema';
-import { eq } from 'drizzle-orm';
+import { eq, asc } from 'drizzle-orm';
 import type { SearchConfigInput } from '@/lib/types';
 
 export async function getActiveConfigs() {
@@ -11,7 +11,7 @@ export async function getActiveConfigs() {
 }
 
 export async function getAllConfigs() {
-  return db.select().from(searchConfigs).orderBy(searchConfigs.createdAt);
+  return db.select().from(searchConfigs).orderBy(asc(searchConfigs.createdAt));
 }
 
 export async function getConfigById(id: number) {

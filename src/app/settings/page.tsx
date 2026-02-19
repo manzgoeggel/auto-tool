@@ -46,6 +46,9 @@ export default function SettingsPage() {
       if (res.ok) {
         const data = await res.json();
         setConfigs(data);
+      } else {
+        const body = await res.json().catch(() => ({}));
+        toast.error(body.detail ? `Failed to load: ${body.detail}` : "Failed to load configurations");
       }
     } catch {
       toast.error("Failed to load configurations");
@@ -72,7 +75,8 @@ export default function SettingsPage() {
       setEditingConfig(null);
       fetchConfigs();
     } else {
-      toast.error("Failed to save configuration");
+      const body = await res.json().catch(() => ({}));
+      toast.error(body.detail ? `Failed to save: ${body.detail}` : "Failed to save configuration");
     }
   };
 
