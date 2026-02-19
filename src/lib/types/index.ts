@@ -18,6 +18,7 @@ export interface RawListing {
   features?: string[];
   description?: string;
   vatDeductible?: boolean;
+  hasAccidentDamage?: boolean;
 }
 
 export interface ScoredListing {
@@ -41,6 +42,7 @@ export interface ScoredListing {
   features?: string[];
   description?: string;
   vatDeductible?: boolean;
+  hasAccidentDamage?: boolean;
   firstSeenAt: Date;
   lastSeenAt: Date;
   isActive: boolean;

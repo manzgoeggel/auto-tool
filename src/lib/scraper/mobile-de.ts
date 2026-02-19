@@ -1,5 +1,6 @@
 import { buildSearchUrl } from './url-builder';
 import { parseSearchResults } from './parser';
+import { parseDetailPage } from './detail-parser';
 import { USER_AGENTS } from '@/lib/constants';
 import type { SearchConfig } from '@/lib/db/schema';
 import type { RawListing } from '@/lib/types';
@@ -12,21 +13,25 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function buildProxiedUrl(url: string): string {
+  const apiKey = process.env.SCRAPER_API_KEY;
+  if (!apiKey) {
+    throw new Error('SCRAPER_API_KEY is not set');
+  }
+  return `https://api.scraperapi.com?api_key=${apiKey}&url=${encodeURIComponent(url)}&country_code=de`;
+}
+
 async function fetchWithRetry(
   url: string,
   retries: number = 3,
 ): Promise<string> {
   for (let attempt = 0; attempt < retries; attempt++) {
     try {
-      const res = await fetch(url, {
+      const proxiedUrl = buildProxiedUrl(url);
+      const res = await fetch(proxiedUrl, {
         headers: {
-          'User-Agent': getRandomUserAgent(),
           'Accept-Language': 'de-DE,de;q=0.9,en;q=0.8',
           'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-          'Accept-Encoding': 'gzip, deflate, br',
-          'Connection': 'keep-alive',
-          'Cache-Control': 'no-cache',
-          'Referer': 'https://www.mobile.de/',
         },
       });
 
@@ -133,8 +138,39 @@ export async function scrapeMobileDe(
   });
 
   console.log(
-    `Scrape complete: ${deduped.length} unique listings from ${page - 1} pages`,
+    `Scrape complete: ${deduped.length} unique listings from ${page - 1} pages. Fetching detail pages...`,
   );
+
+  // Enrich listings with detail page data (VAT, description, features, etc.)
+  // Process in batches of 5 in parallel to stay within rate limits
+  const DETAIL_BATCH = 5;
+  for (let i = 0; i < deduped.length; i += DETAIL_BATCH) {
+    const batch = deduped.slice(i, i + DETAIL_BATCH);
+    await Promise.all(
+      batch.map(async (listing) => {
+        try {
+          const html = await fetchWithRetry(listing.listingUrl, 2);
+          const detail = parseDetailPage(html);
+          // Detail page overrides search result card where it has better data
+          listing.vatDeductible = detail.vatDeductible || listing.vatDeductible;
+          listing.hasAccidentDamage = detail.hasAccidentDamage || listing.hasAccidentDamage;
+          if (detail.description) listing.description = detail.description;
+          if (detail.features && detail.features.length > 0) listing.features = detail.features;
+          if (detail.sellerName) listing.sellerName = detail.sellerName;
+          if (detail.color) listing.color = detail.color;
+          if (detail.bodyType) listing.bodyType = detail.bodyType;
+        } catch (err) {
+          console.warn(`Could not fetch detail page for ${listing.externalId}:`, err);
+        }
+      }),
+    );
+    // Small delay between detail batches
+    if (i + DETAIL_BATCH < deduped.length) {
+      await delay(1000 + Math.random() * 1000);
+    }
+  }
+
+  console.log(`Detail enrichment complete for ${deduped.length} listings`);
 
   return {
     listings: deduped,
