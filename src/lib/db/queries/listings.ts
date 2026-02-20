@@ -93,6 +93,7 @@ export async function getListingsWithScores(filters: {
   brand?: string;
   fuelType?: string;
   onlyActive?: boolean;
+  vatOnly?: boolean;
 }) {
   const {
     page = 1,
@@ -104,6 +105,7 @@ export async function getListingsWithScores(filters: {
     brand,
     fuelType,
     onlyActive = true,
+    vatOnly,
   } = filters;
 
   const offset = (page - 1) * limit;
@@ -114,6 +116,7 @@ export async function getListingsWithScores(filters: {
   if (maxPrice !== undefined) conditions.push(lte(listings.priceEur, maxPrice));
   if (brand) conditions.push(sql`${listings.title} ILIKE ${'%' + brand + '%'}`);
   if (fuelType) conditions.push(eq(listings.fuelType, fuelType));
+  if (vatOnly) conditions.push(eq(listings.vatDeductible, true));
 
   const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 

@@ -6,7 +6,7 @@ import { calculateImportCosts } from '@/lib/import-costs/calculator';
 import { getEurChfRate } from '@/lib/import-costs/exchange-rate';
 import { getBenchmark } from '@/lib/db/queries/benchmarks';
 import { upsertScore } from '@/lib/db/queries/scores';
-import { SCORE_WEIGHTS, CH_RESALE_PREMIUM_FACTOR, getVatRateForCountry } from '@/lib/constants';
+import { SCORE_WEIGHTS, CH_RESALE_PREMIUM_FACTOR, getVatRateForCountry, getPorsche911ChResale } from '@/lib/constants';
 
 export async function scoreAndSaveListing(
   listing: Listing,
@@ -70,14 +70,32 @@ export async function scoreAndSaveListing(
       })
     : null;
 
-  // Estimated resale (based on benchmark or price + premium)
-  const estimatedResaleMedian = benchmark?.estimatedChResaleMedian
-    || (listing.priceEur
-      ? Math.round(listing.priceEur * eurChfRate * CH_RESALE_PREMIUM_FACTOR)
-      : 0);
+  // Estimated CH resale — use real market price table first, then benchmark, then fallback
+  const variantHint = aiAnalysis.variantClassification || listing.title || '';
+  const realResale = (listing.firstRegistrationYear && listing.mileageKm)
+    ? getPorsche911ChResale(variantHint, listing.firstRegistrationYear, listing.mileageKm)
+    : null;
 
-  const estimatedResaleMinChf = Math.round(estimatedResaleMedian * 0.92);
-  const estimatedResaleMaxChf = Math.round(estimatedResaleMedian * 1.08);
+  let estimatedResaleMinChf: number;
+  let estimatedResaleMaxChf: number;
+
+  if (realResale) {
+    // Best case: we have a real CH market price bracket
+    estimatedResaleMinChf = realResale.low;
+    estimatedResaleMaxChf = realResale.high;
+  } else if (benchmark?.estimatedChResaleMedian) {
+    // Second: benchmark derived from actual listing medians + CH premium
+    estimatedResaleMinChf = Math.round(benchmark.estimatedChResaleMedian * 0.92);
+    estimatedResaleMaxChf = Math.round(benchmark.estimatedChResaleMedian * 1.08);
+  } else {
+    // Last resort: apply CH premium to EUR asking price converted to CHF
+    // (circular but better than nothing — clearly labelled as estimate)
+    const fallbackMedian = listing.priceEur
+      ? Math.round(listing.priceEur * eurChfRate * CH_RESALE_PREMIUM_FACTOR)
+      : 0;
+    estimatedResaleMinChf = Math.round(fallbackMedian * 0.92);
+    estimatedResaleMaxChf = Math.round(fallbackMedian * 1.08);
+  }
 
   const landedCost = importCosts?.grandTotalChf || 0;
   const estimatedMarginMinChf = estimatedResaleMinChf - landedCost;

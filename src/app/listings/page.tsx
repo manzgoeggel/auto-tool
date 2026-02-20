@@ -13,6 +13,7 @@ import {
   RefreshCw,
   AlertTriangle,
   ShieldCheck,
+  Filter,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -106,16 +107,18 @@ export default function ListingsPage() {
   const [sortBy, setSortBy] = useState<SortKey>("combined_score");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
   const [search, setSearch] = useState("");
+  const [vatOnly, setVatOnly] = useState(false);
 
   const fetchListings = useCallback(async () => {
     setLoading(true);
     try {
       const params = new URLSearchParams({ page: page.toString(), limit: "40", sortBy, sortOrder });
       if (search) params.set("brand", search);
+      if (vatOnly) params.set("vatOnly", "true");
       const res = await fetch(`/api/listings?${params}`);
       if (res.ok) setData(await res.json());
     } catch { /* ignore */ } finally { setLoading(false); }
-  }, [page, sortBy, sortOrder, search]);
+  }, [page, sortBy, sortOrder, search, vatOnly]);
 
   useEffect(() => { fetchListings(); }, [fetchListings]);
 
@@ -169,11 +172,29 @@ export default function ListingsPage() {
         </div>
       </div>
 
-      {/* Search */}
-      <div className="relative max-w-xs">
-        <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-        <Input value={search} onChange={e => { setSearch(e.target.value); setPage(1); }}
-          placeholder="Search…" className="pl-9 h-9" />
+      {/* Filters row */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <div className="relative">
+          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+          <Input value={search} onChange={e => { setSearch(e.target.value); setPage(1); }}
+            placeholder="Search…" className="pl-9 h-9 w-48" />
+        </div>
+        <button
+          onClick={() => { setVatOnly(v => !v); setPage(1); }}
+          className={`inline-flex items-center gap-1.5 h-9 px-3 rounded-md border text-xs font-medium transition-colors select-none
+            ${vatOnly
+              ? "bg-emerald-500/15 border-emerald-500/40 text-emerald-700 dark:text-emerald-400"
+              : "border-border bg-background text-muted-foreground hover:text-foreground hover:bg-muted/40"
+            }`}
+        >
+          <ShieldCheck className="h-3.5 w-3.5" />
+          VAT deductible only
+        </button>
+        {vatOnly && (
+          <span className="text-xs text-muted-foreground">
+            {data ? `${data.total} listings with deductible VAT` : ""}
+          </span>
+        )}
       </div>
 
       {/* Table */}

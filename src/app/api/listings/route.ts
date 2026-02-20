@@ -32,6 +32,7 @@ export async function GET(request: NextRequest) {
     const maxPrice = searchParams.get('maxPrice') ? parseInt(searchParams.get('maxPrice')!, 10) : undefined;
     const brand = searchParams.get('brand') || undefined;
     const fuelType = searchParams.get('fuelType') || undefined;
+    const vatOnly = searchParams.get('vatOnly') === 'true';
 
     const result = await getListingsWithScores({
       page,
@@ -42,6 +43,7 @@ export async function GET(request: NextRequest) {
       maxPrice,
       brand,
       fuelType,
+      vatOnly,
     });
 
     return NextResponse.json(result);
