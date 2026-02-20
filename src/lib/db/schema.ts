@@ -89,6 +89,43 @@ export const marketBenchmarks = pgTable('market_benchmarks', {
   updatedAt: timestamp('updated_at').defaultNow(),
 });
 
+/**
+ * Deals — user-defined import projects.
+ * Each deal has a budget, preferred brands/models, and stores the best
+ * results found from the last live search run.
+ */
+export const deals = pgTable('deals', {
+  id: serial('id').primaryKey(),
+  name: text('name').notNull(),                          // e.g. "GT3 Project"
+  budgetChf: integer('budget_chf').notNull(),            // max total landed cost in CHF
+  brands: jsonb('brands').$type<string[]>().default([]), // e.g. ["Porsche"]
+  models: jsonb('models').$type<string[]>().default([]), // e.g. ["911"]
+  yearMin: integer('year_min'),
+  yearMax: integer('year_max'),
+  mileageMax: integer('mileage_max'),
+  vatOnly: boolean('vat_only').default(false),
+  notes: text('notes'),                                  // free-form notes
+  status: text('status').default('active'),              // active | archived
+  // Last search results — stored as snapshot of top hits
+  lastSearchAt: timestamp('last_search_at'),
+  lastResultCount: integer('last_result_count'),
+  // Pinned listing IDs (user can pin interesting ones)
+  pinnedListingIds: jsonb('pinned_listing_ids').$type<number[]>().default([]),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+});
+
+// Junction: which listings appeared in which deal's last search
+export const dealListings = pgTable('deal_listings', {
+  id: serial('id').primaryKey(),
+  dealId: integer('deal_id').references(() => deals.id, { onDelete: 'cascade' }).notNull(),
+  listingId: integer('listing_id').references(() => listings.id, { onDelete: 'cascade' }).notNull(),
+  marginMinChf: integer('margin_min_chf'),   // cached at search time
+  marginMaxChf: integer('margin_max_chf'),
+  combinedScore: real('combined_score'),
+  addedAt: timestamp('added_at').defaultNow(),
+});
+
 // Type exports from schema
 export type SearchConfig = typeof searchConfigs.$inferSelect;
 export type NewSearchConfig = typeof searchConfigs.$inferInsert;
@@ -97,3 +134,6 @@ export type NewListing = typeof listings.$inferInsert;
 export type Score = typeof scores.$inferSelect;
 export type NewScore = typeof scores.$inferInsert;
 export type MarketBenchmarkRow = typeof marketBenchmarks.$inferSelect;
+export type Deal = typeof deals.$inferSelect;
+export type NewDeal = typeof deals.$inferInsert;
+export type DealListing = typeof dealListings.$inferSelect;

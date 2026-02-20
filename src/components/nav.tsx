@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Radar, Settings, List, Sun, Moon } from "lucide-react";
+import { Radar, Settings, List, Sun, Moon, TrendingUp } from "lucide-react";
 import { useTheme } from "next-themes";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -10,6 +10,7 @@ import { cn } from "@/lib/utils";
 const navItems = [
   { href: "/", label: "Dashboard", icon: Radar },
   { href: "/listings", label: "All Listings", icon: List },
+  { href: "/deals", label: "Deals", icon: TrendingUp },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 
