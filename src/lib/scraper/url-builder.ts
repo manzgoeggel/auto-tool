@@ -76,8 +76,8 @@ export function buildSearchUrl(config: SearchConfig, page: number = 1): string {
     if (mapped) params.append('tr', mapped);
   }
 
-  // Page size: 50 results per page (mobile.de supports up to ~50)
-  params.set('ps', '50');
+  // Page size: mobile.de caps at 20 results per page regardless of this value
+  params.set('ps', '20');
 
   // Pagination
   if (page > 1) {
