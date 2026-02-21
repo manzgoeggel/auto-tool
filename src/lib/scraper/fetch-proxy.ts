@@ -124,32 +124,61 @@ async function fetchViaBrightData(
 }
 
 // ─── ScraperAPI fallback ──────────────────────────────────────────────────────
+//
+// Strategy: try cheapest/fastest mode first, escalate on failure:
+//   1. premium=true only (residential IP, no headless browser) — fast, ~5-15s
+//   2. render=true&premium=true (residential + headless Chrome) — slow, ~30-60s
+//
+// mobile.de search result pages are server-side rendered — they don't need
+// a headless browser. Most blocks are IP-reputation based, so premium proxies
+// alone (without render) often succeed and are ~5x faster.
 
-function buildScraperApiUrl(url: string): string {
+function buildScraperApiUrl(url: string, render: boolean): string {
   const apiKey = process.env.SCRAPER_API_KEY;
   if (!apiKey) throw new Error('SCRAPER_API_KEY is not set');
-  return `https://api.scraperapi.com?api_key=${apiKey}&url=${encodeURIComponent(url)}&country_code=de&render=true&premium=true`;
+  const base = `https://api.scraperapi.com?api_key=${apiKey}&url=${encodeURIComponent(url)}&country_code=de&premium=true`;
+  return render ? base + '&render=true' : base;
 }
 
 async function fetchViaScraperApi(
   url: string,
   timeoutMs: number,
 ): Promise<{ html: string; setCookie: string }> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const res = await fetch(buildScraperApiUrl(url), {
-      headers: CHROME_HEADERS,
-      signal: controller.signal,
-    });
-    if (res.status === 403 || res.status === 500) {
-      throw new Error(`ScraperAPI ${res.status} — target blocked`);
+  // Attempt 1: premium residential proxy, no render (fast)
+  for (const render of [false, true]) {
+    const controller = new AbortController();
+    // No-render mode: 30s is plenty. Render mode: allow up to timeoutMs.
+    const perAttemptTimeout = render ? timeoutMs : Math.min(30_000, timeoutMs);
+    const timer = setTimeout(() => controller.abort(), perAttemptTimeout);
+    try {
+      const res = await fetch(buildScraperApiUrl(url, render), {
+        headers: CHROME_HEADERS,
+        signal: controller.signal,
+      });
+      clearTimeout(timer);
+
+      if (res.status === 403 || res.status === 500) {
+        if (!render) {
+          console.warn(`[fetch-proxy] ScraperAPI ${res.status} without render — escalating to render=true`);
+          continue; // try with render
+        }
+        throw new Error(`ScraperAPI ${res.status} even with render=true — blocked`);
+      }
+      if (!res.ok) throw new Error(`ScraperAPI HTTP ${res.status}`);
+      const html = await res.text();
+      console.log(`[fetch-proxy] ScraperAPI success (render=${render}, ${html.length} bytes)`);
+      return { html, setCookie: '' };
+    } catch (err) {
+      clearTimeout(timer);
+      const msg = err instanceof Error ? err.message : String(err);
+      if (!render) {
+        console.warn(`[fetch-proxy] ScraperAPI no-render failed (${msg}) — escalating to render=true`);
+        continue;
+      }
+      throw err; // render=true also failed — let outer retry handle it
     }
-    if (!res.ok) throw new Error(`ScraperAPI HTTP ${res.status}`);
-    return { html: await res.text(), setCookie: '' };
-  } finally {
-    clearTimeout(timer);
   }
+  throw new Error('ScraperAPI: all modes exhausted');
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────
@@ -207,10 +236,10 @@ export async function fetchUnblocked(
       console.warn(`[fetch-proxy] Attempt ${attempt + 1}/${retries} failed for ${url}: ${msg}`);
 
       if (attempt < retries - 1) {
-        // Exponential backoff with jitter: 5s, 15s, 40s
-        const baseDelay = Math.pow(3, attempt) * 5000;
-        const jitter = Math.random() * 5000;
-        const wait = baseDelay + jitter;
+        // Exponential backoff with jitter: 3s, 8s, 20s
+        const baseDelay = Math.pow(2.5, attempt) * 3000;
+        const jitter = Math.random() * 3000;
+        const wait = Math.round(baseDelay + jitter);
         console.log(`[fetch-proxy] Waiting ${Math.round(wait / 1000)}s before retry…`);
         await delay(wait);
       } else {

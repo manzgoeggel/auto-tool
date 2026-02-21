@@ -85,10 +85,9 @@ export async function scrapeMobileDe(
 
       page++;
 
-      // Polite delay between pages: 4–8 seconds with randomisation
-      // (longer than before since Bright Data requests are metered)
+      // Polite delay between pages: 2–5 seconds with randomisation
       if (hasMorePages && page <= maxPages) {
-        const waitMs = 4000 + Math.random() * 4000;
+        const waitMs = 2000 + Math.random() * 3000;
         console.log(`[scraper] Waiting ${Math.round(waitMs / 1000)}s before next page…`);
         await delay(waitMs);
       }
