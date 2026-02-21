@@ -34,11 +34,11 @@ export async function upsertListing(listing: RawListing, configId?: number) {
         sellerType: listing.sellerType,
         sellerName: listing.sellerName,
         location: listing.location,
-        country: listing.country || 'DE',
         imageUrl: listing.imageUrl,
-        vatDeductible: listing.vatDeductible,
+        // Do NOT overwrite vatDeductible from the index page — the search result
+        // card doesn't reliably include the MwSt badge. Enrich sets it from the
+        // detail page. Preserve whatever is already stored.
         hasAccidentDamage: listing.hasAccidentDamage ?? false,
-        sourceVatRate: listing.sourceVatRate,
         priceHistory,
         lastSeenAt: new Date(),
         isActive: true,
@@ -71,7 +71,10 @@ export async function upsertListing(listing: RawListing, configId?: number) {
       color: listing.color,
       features: listing.features,
       description: listing.description,
-      vatDeductible: listing.vatDeductible,
+      // Default to true — we only ever scrape with mwst=true in the URL so every
+      // listing here is from a VAT-deductible search. Enrich will confirm/correct
+      // this from the detail page.
+      vatDeductible: true,
       hasAccidentDamage: listing.hasAccidentDamage ?? false,
       sourceVatRate: listing.sourceVatRate,
       priceHistory: listing.priceEur

@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { listings } from '@/lib/db/schema';
-import { eq, isNull, or } from 'drizzle-orm';
+import { eq, isNull } from 'drizzle-orm';
 import { parseDetailPage } from '@/lib/scraper/detail-parser';
 import { fetchUnblocked, CookieJar } from '@/lib/scraper/fetch-proxy';
 
@@ -13,8 +13,9 @@ function delay(ms: number): Promise<void> {
 
 export async function POST() {
   try {
-    // Only enrich listings that haven't been visited yet
-    // (vatDeductible is null = detail page never fetched)
+    // Only enrich listings not yet visited — country IS NULL is the reliable signal
+    // (vatDeductible is now always defaulted to true on insert since we scrape
+    // with mwst=true, so it's no longer a useful "not enriched" indicator)
     const needsEnrich = await db
       .select({
         id: listings.id,
@@ -22,12 +23,7 @@ export async function POST() {
         externalId: listings.externalId,
       })
       .from(listings)
-      .where(
-        or(
-          isNull(listings.vatDeductible),
-          isNull(listings.country),
-        ),
-      );
+      .where(isNull(listings.country));
 
     console.log(`[enrich] ${needsEnrich.length} listings need enrichment`);
 

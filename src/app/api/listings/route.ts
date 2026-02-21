@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getListingsWithScores, getTodaysTopDeals, getListingById } from '@/lib/db/queries/listings';
 import { db } from '@/lib/db';
 import { listings, scores, dealListings } from '@/lib/db/schema';
+import { eq } from 'drizzle-orm';
 
 export async function GET(request: NextRequest) {
   try {
@@ -52,6 +53,22 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     console.error('Failed to fetch listings:', error);
     return NextResponse.json({ error: 'Failed to fetch listings' }, { status: 500 });
+  }
+}
+
+// PATCH /api/listings?fixVat=true — set vatDeductible=true on all listings
+// (all were scraped with mwst=true so all should be VAT deductible)
+export async function PATCH(request: NextRequest) {
+  try {
+    const { searchParams } = new URL(request.url);
+    if (searchParams.get('fixVat') !== 'true') {
+      return NextResponse.json({ error: 'Pass ?fixVat=true to confirm' }, { status: 400 });
+    }
+    await db.update(listings).set({ vatDeductible: true }).where(eq(listings.isActive, true));
+    return NextResponse.json({ success: true, message: 'All active listings set to vatDeductible=true' });
+  } catch (error) {
+    console.error('[fixVat] Failed:', error);
+    return NextResponse.json({ error: 'Failed' }, { status: 500 });
   }
 }
 
