@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Plus, Play, Trash2, ToggleLeft, ToggleRight, Loader2, Pencil } from "lucide-react";
+import { Plus, Play, Trash2, ToggleLeft, ToggleRight, Loader2, Pencil, DatabaseZap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -41,6 +41,7 @@ export default function SettingsPage() {
   const [scraping, setScraping] = useState(false);
   const [scoring, setScoring] = useState(false);
   const [enriching, setEnriching] = useState(false);
+  const [wiping, setWiping] = useState(false);
   const [maxPages, setMaxPages] = useState(20);
 
   const fetchConfigs = useCallback(async () => {
@@ -165,6 +166,23 @@ export default function SettingsPage() {
     }
   };
 
+  const handleWipe = async () => {
+    setWiping(true);
+    try {
+      const res = await fetch("/api/listings?wipe=true", { method: "DELETE" });
+      const data = await res.json();
+      if (res.ok) {
+        toast.success("All listings wiped — ready for a fresh scrape");
+      } else {
+        toast.error("Wipe failed: " + (data.error || "Unknown error"));
+      }
+    } catch {
+      toast.error("Wipe failed");
+    } finally {
+      setWiping(false);
+    }
+  };
+
   return (
     <div className="max-w-4xl mx-auto space-y-6">
       <div className="flex items-center justify-between">
@@ -262,6 +280,18 @@ export default function SettingsPage() {
             <Button variant="outline" onClick={handleScore} disabled={scoring}>
               {scoring && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               {scoring ? "Scoring..." : "Score Unscored Listings"}
+            </Button>
+            <Button
+              variant="outline"
+              onClick={handleWipe}
+              disabled={wiping}
+              className="border-destructive/40 text-destructive hover:bg-destructive hover:text-destructive-foreground ml-auto"
+            >
+              {wiping
+                ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                : <DatabaseZap className="mr-2 h-4 w-4" />
+              }
+              {wiping ? "Wiping..." : "Wipe All Listings"}
             </Button>
           </div>
         </CardContent>

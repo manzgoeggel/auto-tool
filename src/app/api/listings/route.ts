@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getListingsWithScores, getTodaysTopDeals, getListingById } from '@/lib/db/queries/listings';
+import { db } from '@/lib/db';
+import { listings, scores, dealListings } from '@/lib/db/schema';
 
 export async function GET(request: NextRequest) {
   try {
@@ -50,5 +52,31 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     console.error('Failed to fetch listings:', error);
     return NextResponse.json({ error: 'Failed to fetch listings' }, { status: 500 });
+  }
+}
+
+// DELETE /api/listings?wipe=true — truncate all listings, scores, and deal results
+export async function DELETE(request: NextRequest) {
+  try {
+    const { searchParams } = new URL(request.url);
+    if (searchParams.get('wipe') !== 'true') {
+      return NextResponse.json({ error: 'Pass ?wipe=true to confirm' }, { status: 400 });
+    }
+
+    // Delete in dependency order: deal_listings → scores → listings
+    await db.delete(dealListings);
+    await db.delete(scores);
+    const deleted = await db.delete(listings);
+
+    console.log('[wipe] All listings, scores and deal results deleted');
+
+    return NextResponse.json({
+      success: true,
+      message: 'All listings wiped',
+      deleted: (deleted as unknown as { rowCount?: number }).rowCount ?? '?',
+    });
+  } catch (error) {
+    console.error('[wipe] Failed:', error);
+    return NextResponse.json({ error: 'Wipe failed' }, { status: 500 });
   }
 }
