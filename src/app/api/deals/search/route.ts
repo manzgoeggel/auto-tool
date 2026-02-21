@@ -5,10 +5,7 @@ import { scrapeMobileDe } from '@/lib/scraper/mobile-de';
 import { scoreAndSaveListing } from '@/lib/scoring/combined';
 import { db } from '@/lib/db';
 import { listings, scores } from '@/lib/db/schema';
-import { eq, and, lte, inArray } from 'drizzle-orm';
-import { calculateImportCosts } from '@/lib/import-costs/calculator';
-import { getEurChfRate } from '@/lib/import-costs/exchange-rate';
-import { getVatRateForCountry } from '@/lib/constants';
+import { eq, and, inArray } from 'drizzle-orm';
 
 export const maxDuration = 300;
 
@@ -79,7 +76,6 @@ export async function POST(request: NextRequest) {
     console.log(`[Deal ${deal.id}] Scored ${scored} listings`);
 
     // Fetch scored listings and filter by budget
-    const eurChfRate = await getEurChfRate();
     const scoredRows = await db
       .select()
       .from(listings)

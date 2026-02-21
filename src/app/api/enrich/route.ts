@@ -1,57 +1,57 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { listings } from '@/lib/db/schema';
-import { eq } from 'drizzle-orm';
+import { eq, isNull, or } from 'drizzle-orm';
 import { parseDetailPage } from '@/lib/scraper/detail-parser';
+import { fetchUnblocked, CookieJar } from '@/lib/scraper/fetch-proxy';
 
 export const maxDuration = 300;
 
-// Per-listing fetch timeout (60s) — render=true uses headless Chrome, takes 10-20s per request
-const FETCH_TIMEOUT_MS = 60_000;
-
-function buildProxiedUrl(url: string): string {
-  const apiKey = process.env.SCRAPER_API_KEY;
-  if (!apiKey) throw new Error('SCRAPER_API_KEY is not set');
-  return `https://api.scraperapi.com?api_key=${apiKey}&url=${encodeURIComponent(url)}&country_code=de&render=true&premium=true`;
-}
-
-async function fetchDetail(url: string): Promise<string> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-  try {
-    const res = await fetch(buildProxiedUrl(url), {
-      signal: controller.signal,
-      headers: {
-        'Accept-Language': 'de-DE,de;q=0.9',
-        'Accept': 'text/html,application/xhtml+xml',
-      },
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return await res.text();
-  } finally {
-    clearTimeout(timer);
-  }
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export async function POST() {
   try {
-    const allListings = await db.select({
-      id: listings.id,
-      listingUrl: listings.listingUrl,
-      externalId: listings.externalId,
-    }).from(listings).where(eq(listings.isActive, true));
+    // Only enrich listings that haven't been visited yet
+    // (vatDeductible is null = detail page never fetched)
+    const needsEnrich = await db
+      .select({
+        id: listings.id,
+        listingUrl: listings.listingUrl,
+        externalId: listings.externalId,
+      })
+      .from(listings)
+      .where(
+        or(
+          isNull(listings.vatDeductible),
+          isNull(listings.country),
+        ),
+      );
+
+    console.log(`[enrich] ${needsEnrich.length} listings need enrichment`);
 
     let enriched = 0;
     let errors = 0;
 
-    // Process in batches of 3 in parallel (ScraperAPI concurrency-friendly)
+    // One cookie jar for the whole session — improves legitimacy
+    const jar = new CookieJar();
+
+    // Process in batches of 3 in parallel
     const BATCH_SIZE = 3;
-    for (let i = 0; i < allListings.length; i += BATCH_SIZE) {
-      const batch = allListings.slice(i, i + BATCH_SIZE);
+    for (let i = 0; i < needsEnrich.length; i += BATCH_SIZE) {
+      const batch = needsEnrich.slice(i, i + BATCH_SIZE);
       await Promise.all(
         batch.map(async (listing) => {
           try {
-            const html = await fetchDetail(listing.listingUrl);
+            const { html, setCookie } = await fetchUnblocked(listing.listingUrl, {
+              cookies: jar.toString(),
+              timeoutMs: 90_000,
+              retries: 3,
+            });
+
+            jar.merge(setCookie);
+
             const detail = parseDetailPage(html);
             await db.update(listings).set({
               vatDeductible: detail.vatDeductible,
@@ -64,28 +64,32 @@ export async function POST() {
               ...(detail.country ? { country: detail.country } : {}),
               ...(detail.sourceVatRate != null ? { sourceVatRate: detail.sourceVatRate } : {}),
             }).where(eq(listings.id, listing.id));
-            console.log(`Enriched listing ${listing.externalId}: VAT=${detail.vatDeductible}, country=${detail.country ?? 'DE'}`);
+
+            console.log(
+              `[enrich] ✓ ${listing.externalId}: ` +
+              `VAT=${detail.vatDeductible}, country=${detail.country ?? 'DE'}`,
+            );
             enriched++;
           } catch (err) {
-            console.warn(`Failed to enrich ${listing.externalId}:`, err);
+            console.warn(`[enrich] ✗ ${listing.externalId}:`, err);
             errors++;
           }
         }),
       );
-      // Delay between batches to avoid hammering ScraperAPI
-      if (i + BATCH_SIZE < allListings.length) {
-        await new Promise((r) => setTimeout(r, 2000));
+
+      if (i + BATCH_SIZE < needsEnrich.length) {
+        await delay(2000 + Math.random() * 2000);
       }
     }
 
     return NextResponse.json({
       success: true,
-      total: allListings.length,
+      total: needsEnrich.length,
       enriched,
       errors,
     });
   } catch (error) {
-    console.error('Enrich failed:', error);
+    console.error('[enrich] Failed:', error);
     return NextResponse.json({ error: 'Enrich failed' }, { status: 500 });
   }
 }
