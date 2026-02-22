@@ -87,9 +87,10 @@ export function buildSearchUrl(config: SearchConfig, page: number = 1): string {
   // Sort by newest first to catch fresh listings
   params.set('sb', 'doc'); // sort by date of creation
 
-  // Always filter for VAT-deductible listings only (MwSt. ausweisbar)
-  // This avoids wasting scrape credits on private/non-VAT listings
-  params.set('mwst', 'true');
+  // Filter for VAT-deductible listings only (MwSt. ausweisbar)
+  // Confirmed parameter: vat=1 (not mwst=true which is ignored by mobile.de)
+  // Source: https://apify.com/3x1t/mobile-de-scraper URL examples
+  params.set('vat', '1');
 
   return `https://suchen.mobile.de/fahrzeuge/search.html?${params.toString()}`;
 }
