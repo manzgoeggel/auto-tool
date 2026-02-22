@@ -117,7 +117,8 @@ export default function SettingsPage() {
         const newCount = data.results?.reduce(
           (sum: number, r: { newCount?: number }) => sum + (r.newCount || 0), 0,
         );
-        toast.success(`Scrape complete: ${totalFound} listings (${newCount} new). Run "Enrich Listings" next to fetch VAT & details.`);
+        const scored = data.scored ?? 0;
+        toast.success(`Scrape complete: ${totalFound} listings (${newCount} new, ${scored} scored). Run "Enrich Listings" next to fetch VAT & details.`);
       } else {
         toast.error("Scrape failed: " + (data.error || "Unknown error"));
       }
@@ -257,7 +258,7 @@ export default function SettingsPage() {
                   onChange={(e) => setMaxPages(Math.min(50, Math.max(1, parseInt(e.target.value) || 1)))}
                   className="w-20 h-9 text-sm"
                 />
-                <span className="text-xs text-muted-foreground">× 50 results/page = up to {maxPages * 50} listings</span>
+                <span className="text-xs text-muted-foreground">× 20 results/page = up to {maxPages * 20} listings</span>
               </div>
             </div>
           </div>
