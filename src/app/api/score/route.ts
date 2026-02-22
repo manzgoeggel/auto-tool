@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getUnscoredListings, getListingById } from '@/lib/db/queries/listings';
+import { getUnscoredListings, getListingById, getAllActiveListings } from '@/lib/db/queries/listings';
 import { scoreAndSaveListing } from '@/lib/scoring/combined';
 import { updateBenchmarksFromListings } from '@/lib/db/queries/benchmarks';
 
@@ -24,8 +24,9 @@ export async function POST(request: NextRequest) {
     // Update benchmarks first
     const benchmarksUpdated = await updateBenchmarksFromListings();
 
-    // Score all unscored listings
-    const unscored = await getUnscoredListings();
+    // scoreAll=true rescores everything, otherwise only unscored
+    const scoreAll = body.scoreAll === true;
+    const unscored = scoreAll ? await getAllActiveListings() : await getUnscoredListings();
 
     let scored = 0;
     let errors = 0;
@@ -50,7 +51,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       success: true,
       benchmarksUpdated,
-      totalUnscored: unscored.length,
+      total: unscored.length,
       scored,
       errors,
     });

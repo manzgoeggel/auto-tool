@@ -11,6 +11,7 @@ export interface RawListing {
   sellerType: 'dealer' | 'private';
   sellerName?: string;
   location: string;
+  country?: string;
   listingUrl: string;
   imageUrl?: string;
   bodyType?: string;
@@ -19,6 +20,7 @@ export interface RawListing {
   description?: string;
   vatDeductible?: boolean;
   hasAccidentDamage?: boolean;
+  sourceVatRate?: number;
 }
 
 export interface ScoredListing {
@@ -104,11 +106,21 @@ export interface HeuristicFactors {
   total: number;
 }
 
+export interface SpecDetail {
+  spec: string;
+  impact: 'high' | 'medium' | 'low';
+  note: string;
+}
+
 export interface AIAnalysis {
   score: number;
   explanation: string;
   redFlags: string[];
   highlights: string[];
+  specScore: number;
+  keySpecs: SpecDetail[];
+  missingSpecs: string[];
+  variantClassification: string;
 }
 
 export interface MarketBenchmark {

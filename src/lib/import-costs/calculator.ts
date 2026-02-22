@@ -17,6 +17,8 @@ export function calculateImportCosts(params: {
   eurChfRate: number;
   transportCostChf?: number;
   vehicleWeightKg?: number;
+  /** Source country VAT rate (e.g. 0.19 for DE, 0.20 for AT). Defaults to GERMAN_VAT_RATE. */
+  sourceVatRate?: number;
 }): ImportCostBreakdown {
   const {
     priceEur,
@@ -24,14 +26,15 @@ export function calculateImportCosts(params: {
     eurChfRate,
     transportCostChf = DEFAULT_TRANSPORT_COST_CHF,
     vehicleWeightKg = DEFAULT_VEHICLE_WEIGHT_KG,
+    sourceVatRate = GERMAN_VAT_RATE,
   } = params;
 
   const vehiclePriceChf = priceEur * eurChfRate;
 
-  // If VAT deductible: the listed price includes 19% DE MwSt
-  // Net = gross / 1.19, so deduction = gross - gross/1.19 = gross * (19/119)
+  // If VAT deductible: the listed price includes the source country's VAT.
+  // Net = gross / (1 + vatRate), so deduction = gross * (vatRate / (1 + vatRate))
   const germanVatDeducted = isVatDeductible
-    ? vehiclePriceChf * (GERMAN_VAT_RATE / (1 + GERMAN_VAT_RATE))
+    ? vehiclePriceChf * (sourceVatRate / (1 + sourceVatRate))
     : 0;
 
   const netPriceChf = vehiclePriceChf - germanVatDeducted;

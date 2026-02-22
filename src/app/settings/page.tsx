@@ -1,8 +1,9 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Plus, Play, Trash2, ToggleLeft, ToggleRight, Loader2, Pencil } from "lucide-react";
+import { Plus, Play, Trash2, ToggleLeft, ToggleRight, Loader2, Pencil, DatabaseZap } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -40,6 +41,8 @@ export default function SettingsPage() {
   const [scraping, setScraping] = useState(false);
   const [scoring, setScoring] = useState(false);
   const [enriching, setEnriching] = useState(false);
+  const [wiping, setWiping] = useState(false);
+  const [maxPages, setMaxPages] = useState(20);
 
   const fetchConfigs = useCallback(async () => {
     try {
@@ -103,18 +106,22 @@ export default function SettingsPage() {
   const handleScrape = async (configId?: number) => {
     setScraping(true);
     try {
+      const body: Record<string, unknown> = { maxPages };
+      if (configId) body.configId = configId;
       const res = await fetch("/api/scrape", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(configId ? { configId } : {}),
+        body: JSON.stringify(body),
       });
       const data = await res.json();
       if (res.ok) {
         const totalFound = data.results?.reduce(
-          (sum: number, r: { totalFound?: number }) => sum + (r.totalFound || 0),
-          0,
+          (sum: number, r: { totalFound?: number }) => sum + (r.totalFound || 0), 0,
         );
-        toast.success(`Scrape complete: ${totalFound} listings found`);
+        const newCount = data.results?.reduce(
+          (sum: number, r: { newCount?: number }) => sum + (r.newCount || 0), 0,
+        );
+        toast.success(`Scrape complete: ${totalFound} listings (${newCount} new). Run "Enrich Listings" next to fetch VAT & details.`);
       } else {
         toast.error("Scrape failed: " + (data.error || "Unknown error"));
       }
@@ -160,6 +167,23 @@ export default function SettingsPage() {
       toast.error("Scoring failed");
     } finally {
       setScoring(false);
+    }
+  };
+
+  const handleWipe = async () => {
+    setWiping(true);
+    try {
+      const res = await fetch("/api/listings?wipe=true", { method: "DELETE" });
+      const data = await res.json();
+      if (res.ok) {
+        toast.success("All listings wiped — ready for a fresh scrape");
+      } else {
+        toast.error("Wipe failed: " + (data.error || "Unknown error"));
+      }
+    } catch {
+      toast.error("Wipe failed");
+    } finally {
+      setWiping(false);
     }
   };
 
@@ -224,26 +248,56 @@ export default function SettingsPage() {
         <CardHeader>
           <CardTitle className="text-lg">Actions</CardTitle>
         </CardHeader>
-        <CardContent className="flex flex-wrap gap-3">
-          <Button
-            onClick={() => handleScrape()}
-            disabled={scraping || configs.filter((c) => c.isActive).length === 0}
-          >
-            {scraping ? (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            ) : (
-              <Play className="mr-2 h-4 w-4" />
-            )}
-            {scraping ? "Scraping..." : "Run Scraper (All Configs)"}
-          </Button>
-          <Button variant="outline" onClick={handleEnrich} disabled={enriching}>
-            {enriching && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            {enriching ? "Enriching..." : "Enrich Listings (VAT + Details)"}
-          </Button>
-          <Button variant="outline" onClick={handleScore} disabled={scoring}>
-            {scoring && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            {scoring ? "Scoring..." : "Score Unscored Listings"}
-          </Button>
+        <CardContent className="space-y-4">
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="space-y-1">
+              <label className="text-xs text-muted-foreground">Pages to fetch</label>
+              <div className="flex items-center gap-1.5">
+                <Input
+                  type="number"
+                  min={1}
+                  max={50}
+                  value={maxPages}
+                  onChange={(e) => setMaxPages(Math.min(50, Math.max(1, parseInt(e.target.value) || 1)))}
+                  className="w-20 h-9 text-sm"
+                />
+                <span className="text-xs text-muted-foreground">× 50 results/page = up to {maxPages * 50} listings</span>
+              </div>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-3">
+            <Button
+              onClick={() => handleScrape()}
+              disabled={scraping || configs.filter((c) => c.isActive).length === 0}
+            >
+              {scraping ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Play className="mr-2 h-4 w-4" />
+              )}
+              {scraping ? "Scraping..." : "Run Scraper (All Configs)"}
+            </Button>
+            <Button variant="outline" onClick={handleEnrich} disabled={enriching}>
+              {enriching && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              {enriching ? "Enriching..." : "Enrich Listings (VAT + Details)"}
+            </Button>
+            <Button variant="outline" onClick={handleScore} disabled={scoring}>
+              {scoring && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              {scoring ? "Scoring..." : "Score Unscored Listings"}
+            </Button>
+            <Button
+              variant="outline"
+              onClick={handleWipe}
+              disabled={wiping}
+              className="border-destructive/40 text-destructive hover:bg-destructive hover:text-destructive-foreground ml-auto"
+            >
+              {wiping
+                ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                : <DatabaseZap className="mr-2 h-4 w-4" />
+              }
+              {wiping ? "Wiping..." : "Wipe All Listings"}
+            </Button>
+          </div>
         </CardContent>
       </Card>
 

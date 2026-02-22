@@ -1,77 +1,21 @@
 import { buildSearchUrl } from './url-builder';
 import { parseSearchResults } from './parser';
-import { parseDetailPage } from './detail-parser';
-import { USER_AGENTS } from '@/lib/constants';
+import { fetchUnblocked, CookieJar, getProvider } from './fetch-proxy';
 import type { SearchConfig } from '@/lib/db/schema';
 import type { RawListing } from '@/lib/types';
-
-function getRandomUserAgent(): string {
-  return USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)];
-}
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function buildProxiedUrl(url: string): string {
-  const apiKey = process.env.SCRAPER_API_KEY;
-  if (!apiKey) {
-    throw new Error('SCRAPER_API_KEY is not set');
-  }
-  return `https://api.scraperapi.com?api_key=${apiKey}&url=${encodeURIComponent(url)}&country_code=de`;
-}
-
-async function fetchWithRetry(
-  url: string,
-  retries: number = 3,
-): Promise<string> {
-  for (let attempt = 0; attempt < retries; attempt++) {
-    try {
-      const proxiedUrl = buildProxiedUrl(url);
-      const res = await fetch(proxiedUrl, {
-        headers: {
-          'Accept-Language': 'de-DE,de;q=0.9,en;q=0.8',
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        },
-      });
-
-      if (res.status === 429) {
-        const waitTime = Math.pow(2, attempt + 1) * 5000;
-        console.warn(`Rate limited, waiting ${waitTime}ms before retry ${attempt + 1}`);
-        await delay(waitTime);
-        continue;
-      }
-
-      if (res.status === 403) {
-        console.warn(`Access forbidden (attempt ${attempt + 1}/${retries})`);
-        if (attempt < retries - 1) {
-          await delay(5000 + Math.random() * 5000);
-          continue;
-        }
-        throw new Error('Access forbidden by mobile.de - may need to adjust scraping approach');
-      }
-
-      if (!res.ok) {
-        throw new Error(`HTTP ${res.status}: ${res.statusText}`);
-      }
-
-      return await res.text();
-    } catch (error) {
-      if (attempt === retries - 1) throw error;
-      const waitTime = Math.pow(2, attempt) * 2000 + Math.random() * 2000;
-      console.warn(`Fetch failed (attempt ${attempt + 1}), retrying in ${waitTime}ms:`, error);
-      await delay(waitTime);
-    }
-  }
-
-  throw new Error('All fetch retries exhausted');
-}
-
 export async function scrapeMobileDe(
   config: SearchConfig,
   maxPages: number = 10,
+  existingIds: Set<string> = new Set(),
 ): Promise<{
   listings: RawListing[];
+  newCount: number;
+  updatedCount: number;
   totalResults?: number;
   pagesScraped: number;
   errors: string[];
@@ -81,55 +25,87 @@ export async function scrapeMobileDe(
   let page = 1;
   let hasMorePages = true;
   let totalResults: number | undefined;
+  let consecutiveEmpty = 0;
 
-  console.log(`Starting scrape for config: ${config.name}`);
+  // One cookie jar per scrape session — Bright Data passes cookies through,
+  // so maintaining a session makes the traffic look more legitimate.
+  const jar = new CookieJar();
+
+  console.log(
+    `[scraper] Starting scrape for config: "${config.name}" ` +
+    `(${existingIds.size} known IDs, provider: ${getProvider()})`,
+  );
 
   while (hasMorePages && page <= maxPages) {
     try {
       const url = buildSearchUrl(config, page);
-      console.log(`Scraping page ${page}: ${url}`);
+      console.log(`[scraper] Page ${page}: ${url}`);
 
-      const html = await fetchWithRetry(url);
+      const { html, setCookie } = await fetchUnblocked(url, {
+        cookies: jar.toString(),
+        timeoutMs: 90_000,
+        retries: 4,
+      });
+
+      // Merge any new cookies into our session jar
+      jar.merge(setCookie);
+
       const result = parseSearchResults(html);
 
       if (page === 1 && result.totalResults !== undefined) {
         totalResults = result.totalResults;
-        console.log(`Total results found: ${totalResults}`);
+        console.log(`[scraper] Total results on mobile.de: ${totalResults}`);
       }
 
       if (result.listings.length === 0) {
-        console.log(`No listings found on page ${page}, stopping`);
+        consecutiveEmpty++;
+        console.log(`[scraper] No listings on page ${page} (empty run #${consecutiveEmpty})`);
+        if (consecutiveEmpty >= 2) {
+          console.log('[scraper] Two consecutive empty pages — stopping');
+          break;
+        }
+        page++;
+        continue;
+      }
+
+      consecutiveEmpty = 0;
+      allListings.push(...result.listings);
+      hasMorePages = result.hasNext;
+
+      console.log(
+        `[scraper] Page ${page}: ${result.listings.length} listings ` +
+        `(total so far: ${allListings.length}${totalResults ? '/' + totalResults : ''})`,
+      );
+
+      // Stop early if we've collected everything
+      if (totalResults !== undefined && allListings.length >= totalResults) {
+        console.log(`[scraper] Collected all ${totalResults} results — stopping`);
         break;
       }
 
-      allListings.push(...result.listings);
-      hasMorePages = result.hasNext;
       page++;
 
-      console.log(
-        `Page ${page - 1}: found ${result.listings.length} listings (total: ${allListings.length})`,
-      );
-
-      // Rate limiting: random delay between 2-5 seconds
+      // Polite delay between pages: 2–5 seconds with randomisation
       if (hasMorePages && page <= maxPages) {
         const waitMs = 2000 + Math.random() * 3000;
+        console.log(`[scraper] Waiting ${Math.round(waitMs / 1000)}s before next page…`);
         await delay(waitMs);
       }
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       errors.push(`Page ${page}: ${msg}`);
-      console.error(`Error on page ${page}:`, msg);
+      console.error(`[scraper] Error on page ${page}:`, msg);
 
-      // If first page fails, no point continuing
+      // First page failure — no point continuing
       if (page === 1) break;
 
-      // Otherwise try next page
+      // Subsequent page failure — wait and try the next page
       page++;
-      await delay(5000);
+      await delay(8000);
     }
   }
 
-  // Deduplicate by externalId
+  // Deduplicate within this scrape run
   const seen = new Set<string>();
   const deduped = allListings.filter((l) => {
     if (seen.has(l.externalId)) return false;
@@ -137,43 +113,19 @@ export async function scrapeMobileDe(
     return true;
   });
 
+  const newListings = deduped.filter((l) => !existingIds.has(l.externalId));
+  const knownListings = deduped.filter((l) => existingIds.has(l.externalId));
+
   console.log(
-    `Scrape complete: ${deduped.length} unique listings from ${page - 1} pages. Fetching detail pages...`,
+    `[scraper] Done: ${deduped.length} unique (${newListings.length} new, ` +
+    `${knownListings.length} known). ` +
+    `Run "Enrich Listings" to fetch VAT/details.`,
   );
-
-  // Enrich listings with detail page data (VAT, description, features, etc.)
-  // Process in batches of 5 in parallel to stay within rate limits
-  const DETAIL_BATCH = 5;
-  for (let i = 0; i < deduped.length; i += DETAIL_BATCH) {
-    const batch = deduped.slice(i, i + DETAIL_BATCH);
-    await Promise.all(
-      batch.map(async (listing) => {
-        try {
-          const html = await fetchWithRetry(listing.listingUrl, 2);
-          const detail = parseDetailPage(html);
-          // Detail page overrides search result card where it has better data
-          listing.vatDeductible = detail.vatDeductible || listing.vatDeductible;
-          listing.hasAccidentDamage = detail.hasAccidentDamage || listing.hasAccidentDamage;
-          if (detail.description) listing.description = detail.description;
-          if (detail.features && detail.features.length > 0) listing.features = detail.features;
-          if (detail.sellerName) listing.sellerName = detail.sellerName;
-          if (detail.color) listing.color = detail.color;
-          if (detail.bodyType) listing.bodyType = detail.bodyType;
-        } catch (err) {
-          console.warn(`Could not fetch detail page for ${listing.externalId}:`, err);
-        }
-      }),
-    );
-    // Small delay between detail batches
-    if (i + DETAIL_BATCH < deduped.length) {
-      await delay(1000 + Math.random() * 1000);
-    }
-  }
-
-  console.log(`Detail enrichment complete for ${deduped.length} listings`);
 
   return {
     listings: deduped,
+    newCount: newListings.length,
+    updatedCount: knownListings.length,
     totalResults,
     pagesScraped: page - 1,
     errors,

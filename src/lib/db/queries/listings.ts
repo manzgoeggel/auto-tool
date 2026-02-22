@@ -35,7 +35,9 @@ export async function upsertListing(listing: RawListing, configId?: number) {
         sellerName: listing.sellerName,
         location: listing.location,
         imageUrl: listing.imageUrl,
-        vatDeductible: listing.vatDeductible,
+        // Do NOT overwrite vatDeductible from the index page — the search result
+        // card doesn't reliably include the MwSt badge. Enrich sets it from the
+        // detail page. Preserve whatever is already stored.
         hasAccidentDamage: listing.hasAccidentDamage ?? false,
         priceHistory,
         lastSeenAt: new Date(),
@@ -62,14 +64,19 @@ export async function upsertListing(listing: RawListing, configId?: number) {
       sellerType: listing.sellerType,
       sellerName: listing.sellerName,
       location: listing.location,
+      country: listing.country || 'DE',
       listingUrl: listing.listingUrl,
       imageUrl: listing.imageUrl,
       bodyType: listing.bodyType,
       color: listing.color,
       features: listing.features,
       description: listing.description,
-      vatDeductible: listing.vatDeductible,
+      // Default to true — we only ever scrape with mwst=true in the URL so every
+      // listing here is from a VAT-deductible search. Enrich will confirm/correct
+      // this from the detail page.
+      vatDeductible: true,
       hasAccidentDamage: listing.hasAccidentDamage ?? false,
+      sourceVatRate: listing.sourceVatRate,
       priceHistory: listing.priceEur
         ? [{ date: new Date().toISOString().split('T')[0], price: listing.priceEur }]
         : [],
@@ -89,6 +96,7 @@ export async function getListingsWithScores(filters: {
   brand?: string;
   fuelType?: string;
   onlyActive?: boolean;
+  vatOnly?: boolean;
 }) {
   const {
     page = 1,
@@ -100,6 +108,7 @@ export async function getListingsWithScores(filters: {
     brand,
     fuelType,
     onlyActive = true,
+    vatOnly,
   } = filters;
 
   const offset = (page - 1) * limit;
@@ -110,6 +119,7 @@ export async function getListingsWithScores(filters: {
   if (maxPrice !== undefined) conditions.push(lte(listings.priceEur, maxPrice));
   if (brand) conditions.push(sql`${listings.title} ILIKE ${'%' + brand + '%'}`);
   if (fuelType) conditions.push(eq(listings.fuelType, fuelType));
+  if (vatOnly) conditions.push(eq(listings.vatDeductible, true));
 
   const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 
@@ -117,6 +127,7 @@ export async function getListingsWithScores(filters: {
     : sortBy === 'mileage' ? listings.mileageKm
     : sortBy === 'year' ? listings.firstRegistrationYear
     : sortBy === 'first_seen' ? listings.firstSeenAt
+    : sortBy === 'margin' ? scores.estimatedMarginMinChf
     : scores.combinedScore;
 
   const orderDir = sortOrder === 'asc' ? sql`ASC NULLS LAST` : sql`DESC NULLS LAST`;
@@ -191,4 +202,10 @@ export async function getUnscoredListings() {
 
 export async function getAllActiveListings() {
   return db.select().from(listings).where(eq(listings.isActive, true));
+}
+
+/** Returns a Set of externalIds that are already in the DB (active or inactive). */
+export async function getExistingExternalIds(): Promise<Set<string>> {
+  const rows = await db.select({ externalId: listings.externalId }).from(listings);
+  return new Set(rows.map((r) => r.externalId));
 }

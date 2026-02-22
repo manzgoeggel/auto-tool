@@ -12,6 +12,8 @@ import {
   User,
   AlertTriangle,
   Sparkles,
+  Star,
+  ListChecks,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -298,6 +300,100 @@ export default async function ListingDetailPage({
                 </div>
               </div>
             </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Spec Analysis */}
+      {score && (score.variantClassification || (score.keySpecs && (score.keySpecs as { spec: string; impact: string; note: string }[]).length > 0) || (score.missingSpecs && (score.missingSpecs as string[]).length > 0)) && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm font-semibold flex items-center gap-2">
+              <Star className="h-4 w-4" />
+              Spec Analysis
+              {score.variantClassification && (
+                <Badge variant="secondary" className="ml-auto font-normal">
+                  {score.variantClassification}
+                </Badge>
+              )}
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {/* Spec score bar */}
+            {score.specScore != null && (
+              <div className="space-y-1.5">
+                <div className="flex justify-between text-xs text-muted-foreground">
+                  <span>Spec desirability</span>
+                  <span className="font-semibold text-foreground">{Math.round(score.specScore)}/100</span>
+                </div>
+                <div className="h-2 rounded-full bg-muted overflow-hidden">
+                  <div
+                    className={`h-full rounded-full transition-all ${
+                      score.specScore >= 70
+                        ? "bg-emerald-500"
+                        : score.specScore >= 45
+                        ? "bg-amber-500"
+                        : "bg-red-500"
+                    }`}
+                    style={{ width: `${Math.round(score.specScore)}%` }}
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Key specs detected */}
+            {(score.keySpecs as { spec: string; impact: string; note: string }[] | null)?.length ? (
+              <div>
+                <h4 className="text-xs font-semibold text-muted-foreground uppercase mb-2 flex items-center gap-1">
+                  <ListChecks className="h-3.5 w-3.5" />
+                  Detected Specs
+                </h4>
+                <div className="space-y-1.5">
+                  {(score.keySpecs as { spec: string; impact: string; note: string }[]).map((ks, i) => (
+                    <div key={i} className="flex items-start gap-2 text-sm">
+                      <Badge
+                        variant="secondary"
+                        className={`shrink-0 text-xs ${
+                          ks.impact === "high"
+                            ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border-emerald-500/30"
+                            : ks.impact === "medium"
+                            ? "bg-blue-500/15 text-blue-700 dark:text-blue-400 border-blue-500/30"
+                            : "bg-muted text-muted-foreground"
+                        }`}
+                      >
+                        {ks.impact}
+                      </Badge>
+                      <div>
+                        <span className="font-medium">{ks.spec}</span>
+                        {ks.note && (
+                          <span className="text-muted-foreground ml-1">— {ks.note}</span>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
+            {/* Missing specs */}
+            {(score.missingSpecs as string[] | null)?.length ? (
+              <div>
+                <h4 className="text-xs font-semibold text-muted-foreground uppercase mb-2">
+                  Notable Absences
+                </h4>
+                <div className="flex flex-wrap gap-1.5">
+                  {(score.missingSpecs as string[]).map((ms, i) => (
+                    <Badge
+                      key={i}
+                      variant="secondary"
+                      className="bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/30 text-xs"
+                    >
+                      {ms}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+            ) : null}
           </CardContent>
         </Card>
       )}
