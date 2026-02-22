@@ -42,6 +42,7 @@ interface ListingRow {
   score: {
     combinedScore: number | null;
     priceDeltaPercent: number | null;
+    totalLandedCostChf: number | null;
     redFlags: string[] | null;
     variantClassification: string | null;
   } | null;
@@ -172,7 +173,7 @@ export default function ListingsPage() {
     </th>
   );
 
-  const COLS = 9;
+  const COLS = 10;
 
   return (
     <div className="space-y-4">
@@ -232,6 +233,8 @@ export default function ListingsPage() {
                   Car
                 </th>
                 <Th col="price" label="Asking Price" right />
+                {/* Landed cost — not sortable */}
+                <th className="h-9 px-4 text-xs font-medium text-muted-foreground text-right whitespace-nowrap">Landed (CHF)</th>
                 {/* VAT — not sortable */}
                 <th className="h-9 px-4 text-xs font-medium text-muted-foreground text-center whitespace-nowrap">VAT</th>
                 <Th col="year" label="Year" />
@@ -311,6 +314,17 @@ export default function ListingsPage() {
                       <span className="font-semibold tabular-nums text-foreground">
                         {l.priceEur ? formatPrice(l.priceEur, "EUR") : "—"}
                       </span>
+                    </td>
+
+                    {/* Landed cost */}
+                    <td className="px-4 py-2.5 text-right whitespace-nowrap">
+                      {s?.totalLandedCostChf != null ? (
+                        <span className="font-semibold tabular-nums text-foreground">
+                          {formatPrice(s.totalLandedCostChf, "CHF")}
+                        </span>
+                      ) : (
+                        <span className="text-muted-foreground/30 text-xs">—</span>
+                      )}
                     </td>
 
                     {/* VAT */}
