@@ -1,7 +1,7 @@
 import { db } from '../index';
 import { deals, dealListings, listings, scores } from '../schema';
-import { eq, desc, and, inArray, sql } from 'drizzle-orm';
-import type { Deal, NewDeal } from '../schema';
+import { eq, desc, and, sql } from 'drizzle-orm';
+import type { Deal } from '../schema';
 
 export type DealInput = {
   name: string;
@@ -12,8 +12,14 @@ export type DealInput = {
   yearMax?: number | null;
   mileageMax?: number | null;
   vatOnly?: boolean;
+  noAccident?: boolean;
   notes?: string | null;
 };
+
+function generateShareId(): string {
+  // 8-char base36 random slug — no external dependencies
+  return Math.random().toString(36).slice(2, 10);
+}
 
 // ── CRUD ────────────────────────────────────────────────────────────────────
 
@@ -26,10 +32,16 @@ export async function getDealById(id: number): Promise<Deal | null> {
   return rows[0] ?? null;
 }
 
+export async function getDealByShareId(shareId: string): Promise<Deal | null> {
+  const rows = await db.select().from(deals).where(eq(deals.shareId, shareId)).limit(1);
+  return rows[0] ?? null;
+}
+
 export async function createDeal(input: DealInput): Promise<Deal> {
   const rows = await db
     .insert(deals)
     .values({
+      shareId: generateShareId(),
       name: input.name,
       budgetChf: input.budgetChf,
       brands: input.brands ?? [],
@@ -37,7 +49,8 @@ export async function createDeal(input: DealInput): Promise<Deal> {
       yearMin: input.yearMin ?? null,
       yearMax: input.yearMax ?? null,
       mileageMax: input.mileageMax ?? null,
-      vatOnly: input.vatOnly ?? false,
+      vatOnly: input.vatOnly ?? true,
+      noAccident: input.noAccident ?? true,
       notes: input.notes ?? null,
     })
     .returning();
@@ -59,7 +72,7 @@ export async function archiveDeal(id: number): Promise<void> {
 
 export async function togglePinListing(dealId: number, listingId: number): Promise<number[]> {
   const deal = await getDealById(dealId);
-  if (!deal) throw new Error('Deal not found');
+  if (!deal) throw new Error('Deal nicht gefunden');
   const pinned = (deal.pinnedListingIds ?? []) as number[];
   const next = pinned.includes(listingId)
     ? pinned.filter((id) => id !== listingId)
@@ -75,7 +88,6 @@ export async function saveDealResults(
   dealId: number,
   results: Array<{ listingId: number; marginMinChf: number | null; marginMaxChf: number | null; combinedScore: number | null }>,
 ): Promise<void> {
-  // Delete old results
   await db.delete(dealListings).where(eq(dealListings.dealId, dealId));
 
   if (results.length === 0) return;
@@ -97,7 +109,7 @@ export async function saveDealResults(
   }).where(eq(deals.id, dealId));
 }
 
-/** Get deal results with full listing + score data, ordered by margin desc */
+/** Get deal results with full listing + score data, ordered by combined score desc */
 export async function getDealResults(dealId: number) {
   const rows = await db
     .select()
@@ -105,7 +117,7 @@ export async function getDealResults(dealId: number) {
     .innerJoin(listings, eq(dealListings.listingId, listings.id))
     .leftJoin(scores, eq(listings.id, scores.listingId))
     .where(eq(dealListings.dealId, dealId))
-    .orderBy(desc(dealListings.marginMinChf));
+    .orderBy(desc(sql`COALESCE(${scores.combinedScore}, ${dealListings.combinedScore})`));
 
   return rows.map((r) => ({
     listing: r.listings,

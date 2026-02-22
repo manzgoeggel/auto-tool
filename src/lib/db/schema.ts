@@ -97,20 +97,20 @@ export const marketBenchmarks = pgTable('market_benchmarks', {
  */
 export const deals = pgTable('deals', {
   id: serial('id').primaryKey(),
-  name: text('name').notNull(),                          // e.g. "GT3 Project"
-  budgetChf: integer('budget_chf').notNull(),            // max total landed cost in CHF
-  brands: jsonb('brands').$type<string[]>().default([]), // e.g. ["Porsche"]
-  models: jsonb('models').$type<string[]>().default([]), // e.g. ["911"]
+  shareId: text('share_id').unique(),                    // öffentlicher Kurzlink-Slug, z.B. "k7x2m9qr"
+  name: text('name').notNull(),                          // z.B. "GT3 Projekt"
+  budgetChf: integer('budget_chf').notNull(),            // max. Gesamtkosten inkl. Import in CHF
+  brands: jsonb('brands').$type<string[]>().default([]), // z.B. ["Porsche"]
+  models: jsonb('models').$type<string[]>().default([]), // z.B. ["911"]
   yearMin: integer('year_min'),
   yearMax: integer('year_max'),
   mileageMax: integer('mileage_max'),
-  vatOnly: boolean('vat_only').default(false),
-  notes: text('notes'),                                  // free-form notes
+  vatOnly: boolean('vat_only').default(true),            // Standard: nur MwSt.-ausweisbare Fahrzeuge
+  noAccident: boolean('no_accident').default(true),      // Standard: keine Unfallfahrzeuge
+  notes: text('notes'),
   status: text('status').default('active'),              // active | archived
-  // Last search results — stored as snapshot of top hits
   lastSearchAt: timestamp('last_search_at'),
   lastResultCount: integer('last_result_count'),
-  // Pinned listing IDs (user can pin interesting ones)
   pinnedListingIds: jsonb('pinned_listing_ids').$type<number[]>().default([]),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow(),

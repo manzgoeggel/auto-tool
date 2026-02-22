@@ -55,7 +55,8 @@ export default function SettingsPage() {
   const [scoring, setScoring] = useState(false);
   const [enriching, setEnriching] = useState(false);
   const [wiping, setWiping] = useState(false);
-  const [maxPages, setMaxPages] = useState(20);
+  const [maxPages, setMaxPages] = useState(50);
+  const [startPage, setStartPage] = useState(1);
 
   const fetchConfigs = useCallback(async () => {
     try {
@@ -115,7 +116,7 @@ export default function SettingsPage() {
   const handleScrape = async (configId?: number) => {
     setScraping(true);
     try {
-      const body: Record<string, unknown> = { maxPages };
+      const body: Record<string, unknown> = { maxPages, startPage };
       if (configId) body.configId = configId;
       const res = await fetch("/api/scrape", {
         method: "POST",
@@ -131,7 +132,14 @@ export default function SettingsPage() {
           (sum: number, r: { newCount?: number }) => sum + (r.newCount || 0), 0,
         );
         const scored = data.scored ?? 0;
-        toast.success(`Scrape complete: ${totalFound} listings (${newCount} new, ${scored} scored). Run "Enrich Listings" next to fetch VAT & details.`);
+        // If there are more pages to scrape, show the next start page
+        const maxNextPage = data.results?.reduce(
+          (max: number, r: { nextStartPage?: number }) => Math.max(max, r.nextStartPage || 1), 1,
+        );
+        const totalResultsAny = data.results?.find((r: { totalResults?: number }) => r.totalResults != null)?.totalResults;
+        const morePages = totalResultsAny != null && maxNextPage * 20 <= totalResultsAny;
+        const resumeHint = morePages ? ` Resume from page ${maxNextPage} to fetch more.` : "";
+        toast.success(`Scrape complete: ${totalFound} listings (${newCount} new, ${scored} scored).${resumeHint}`);
       } else {
         toast.error("Scrape failed: " + (data.error || "Unknown error"));
       }
@@ -259,16 +267,27 @@ export default function SettingsPage() {
           <CardTitle className="text-lg">Actions</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="flex flex-wrap items-end gap-3">
+          <div className="flex flex-wrap items-end gap-4">
+            <div className="space-y-1">
+              <label className="text-xs text-muted-foreground">Start page</label>
+              <Input
+                type="number"
+                min={1}
+                max={200}
+                value={startPage}
+                onChange={(e) => setStartPage(Math.min(200, Math.max(1, parseInt(e.target.value) || 1)))}
+                className="w-20 h-9 text-sm"
+              />
+            </div>
             <div className="space-y-1">
               <label className="text-xs text-muted-foreground">Pages to fetch</label>
               <div className="flex items-center gap-1.5">
                 <Input
                   type="number"
                   min={1}
-                  max={50}
+                  max={200}
                   value={maxPages}
-                  onChange={(e) => setMaxPages(Math.min(50, Math.max(1, parseInt(e.target.value) || 1)))}
+                  onChange={(e) => setMaxPages(Math.min(200, Math.max(1, parseInt(e.target.value) || 1)))}
                   className="w-20 h-9 text-sm"
                 />
                 <span className="text-xs text-muted-foreground">× 20 results/page = up to {maxPages * 20} listings</span>

@@ -3,101 +3,163 @@ import { getDealById, saveDealResults } from '@/lib/db/queries/deals';
 import { upsertListing, getExistingExternalIds } from '@/lib/db/queries/listings';
 import { scrapeMobileDe } from '@/lib/scraper/mobile-de';
 import { scoreAndSaveListing } from '@/lib/scoring/combined';
+import { updateBenchmarksFromListings } from '@/lib/db/queries/benchmarks';
 import { db } from '@/lib/db';
 import { listings, scores } from '@/lib/db/schema';
-import { eq, and, inArray } from 'drizzle-orm';
+import { eq, and, lte, gte, isNotNull, desc, sql, or, inArray } from 'drizzle-orm';
 
 export const maxDuration = 300;
 
 export async function POST(request: NextRequest) {
   try {
-    const { dealId } = await request.json();
-    if (!dealId) return NextResponse.json({ error: 'dealId required' }, { status: 400 });
+    const body = await request.json();
+    const { dealId } = body;
+    // forceRefresh=true scrapes more pages (5 vs 2)
+    const forceRefresh = body.forceRefresh === true;
+
+    if (!dealId) return NextResponse.json({ error: 'dealId erforderlich' }, { status: 400 });
 
     const deal = await getDealById(dealId);
-    if (!deal) return NextResponse.json({ error: 'Deal not found' }, { status: 404 });
+    if (!deal) return NextResponse.json({ error: 'Deal nicht gefunden' }, { status: 404 });
 
-    // Build a synthetic SearchConfig from the deal params
-    const syntheticConfig = {
-      id: -1,
-      name: deal.name,
-      brands: (deal.brands ?? []) as string[],
-      models: (deal.models ?? []) as string[],
-      yearMin: deal.yearMin ?? null,
-      yearMax: deal.yearMax ?? null,
-      mileageMax: deal.mileageMax ?? null,
-      priceMin: null,
-      // Convert budget CHF → rough EUR ceiling (budget / 0.95 to leave room for import costs)
-      // Import costs are roughly 10-15% on top, so limit to ~85% of budget in EUR
-      priceMax: Math.round((deal.budgetChf / 0.95) * 0.82),
-      fuelTypes: [],
-      transmissions: [],
-      minExpectedMarginChf: null,
-      isActive: true,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    };
+    console.log(`[Deal ${deal.id}] Suche nach "${deal.name}" (Budget CHF ${deal.budgetChf})`);
 
-    console.log(`[Deal ${deal.id}] Searching for "${deal.name}" (budget CHF ${deal.budgetChf}, max EUR price ~${syntheticConfig.priceMax})`);
+    // ── Step 1: Query existing DB listings matching deal criteria ─────────────
+    // This is the fast path — no scraping needed if we already have the data.
+    const dbConditions = [
+      eq(listings.isActive, true),
+      isNotNull(scores.totalLandedCostChf),
+      lte(scores.totalLandedCostChf, deal.budgetChf),
+    ];
 
-    // Scrape mobile.de (3 pages max for deals — fast turnaround)
-    const existingIds = await getExistingExternalIds();
-    const scrapeResult = await scrapeMobileDe(syntheticConfig, 3, existingIds);
-
-    console.log(`[Deal ${deal.id}] Scraped ${scrapeResult.listings.length} listings`);
-
-    // Upsert all found listings into the main listings table
-    const listingIds: number[] = [];
-    for (const raw of scrapeResult.listings) {
-      try {
-        const id = await upsertListing(raw);
-        listingIds.push(id);
-      } catch (err) {
-        console.warn(`Failed to upsert listing ${raw.externalId}:`, err);
-      }
+    // Brand filter: title ILIKE '%Porsche%' OR '%BMW%'
+    const brands = (deal.brands ?? []) as string[];
+    const models = (deal.models ?? []) as string[];
+    if (brands.length > 0) {
+      const brandConditions = brands.map((b) => sql`${listings.title} ILIKE ${'%' + b + '%'}`);
+      dbConditions.push(brandConditions.length === 1 ? brandConditions[0] : or(...brandConditions)!);
     }
-
-    // Score all (skip AI for speed — heuristic only)
-    const toScore = await db
-      .select()
-      .from(listings)
-      .where(and(eq(listings.isActive, true), inArray(listings.id, listingIds)));
-
-    let scored = 0;
-    for (const listing of toScore) {
-      try {
-        await scoreAndSaveListing(listing, true /* skipAI */);
-        scored++;
-      } catch (err) {
-        console.warn(`Failed to score listing ${listing.id}:`, err);
-      }
+    if (models.length > 0) {
+      const modelConditions = models.map((m) => sql`${listings.title} ILIKE ${'%' + m + '%'}`);
+      dbConditions.push(modelConditions.length === 1 ? modelConditions[0] : or(...modelConditions)!);
     }
+    if (deal.yearMin) dbConditions.push(gte(listings.firstRegistrationYear, deal.yearMin));
+    if (deal.yearMax) dbConditions.push(lte(listings.firstRegistrationYear, deal.yearMax));
+    if (deal.mileageMax) dbConditions.push(lte(listings.mileageKm, deal.mileageMax));
+    if (deal.vatOnly) dbConditions.push(eq(listings.vatDeductible, true));
+    if (deal.noAccident) dbConditions.push(eq(listings.hasAccidentDamage, false));
 
-    console.log(`[Deal ${deal.id}] Scored ${scored} listings`);
-
-    // Fetch scored listings and filter by budget
-    const scoredRows = await db
+    const existingRows = await db
       .select()
       .from(listings)
       .innerJoin(scores, eq(listings.id, scores.listingId))
-      .where(and(eq(listings.isActive, true), inArray(listings.id, listingIds)));
+      .where(and(...dbConditions))
+      .orderBy(desc(scores.combinedScore))
+      .limit(200);
 
-    // Filter: landed cost must fit within budget, apply vatOnly if set
-    const withinBudget = scoredRows.filter((r) => {
-      if (deal.vatOnly && !r.listings.vatDeductible) return false;
-      const landed = r.scores.totalLandedCostChf ?? 0;
-      return landed > 0 && landed <= deal.budgetChf;
-    });
+    console.log(`[Deal ${deal.id}] ${existingRows.length} passende Inserate in DB gefunden`);
 
-    // Sort by margin min descending, take top 50
-    const top = withinBudget
-      .sort((a, b) => (b.scores.estimatedMarginMinChf ?? 0) - (a.scores.estimatedMarginMinChf ?? 0))
-      .slice(0, 50);
+    // ── Step 2: Scrape mobile.de for fresh listings ───────────────────────────
+    // Normal search: 5 pages (~100 listings). Force refresh: 10 pages (~200).
+    // Price cap is set in the URL so mobile.de pre-filters by budget.
+    const scrapePages = forceRefresh ? 10 : 5;
+    let scraped = 0;
+    const newIds: number[] = [];
+    {
+      console.log(`[Deal ${deal.id}] Suche auf mobile.de (${scrapePages} Seiten, Preislimit ~${Math.round((deal.budgetChf / 0.95) * 0.82).toLocaleString()}€)…`);
+
+      const syntheticConfig = {
+        id: -1,
+        name: deal.name,
+        brands,
+        models,
+        yearMin: deal.yearMin ?? null,
+        yearMax: deal.yearMax ?? null,
+        mileageMax: deal.mileageMax ?? null,
+        priceMin: null,
+        priceMax: Math.round((deal.budgetChf / 0.95) * 0.82), // budget → EUR price ceiling
+        fuelTypes: [],
+        transmissions: [],
+        minExpectedMarginChf: null,
+        isActive: true,
+        lastScrapedAt: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+
+      const existingIds = await getExistingExternalIds();
+      const scrapeResult = await scrapeMobileDe(
+        syntheticConfig,
+        scrapePages,
+        existingIds,
+        1,
+        { vatOnly: deal.vatOnly ?? true },
+      );
+      scraped = scrapeResult.listings.length;
+
+      // Upsert new listings
+      for (const raw of scrapeResult.listings) {
+        try {
+          const id = await upsertListing(raw);
+          newIds.push(id);
+        } catch { /* skip */ }
+      }
+    }
+
+    // ── Step 3: Score new listings (heuristic first, then AI) ─────────────────
+    let aiScored = 0;
+    if (newIds.length > 0) {
+      await updateBenchmarksFromListings();
+      // Heuristic score all new listings quickly
+      const toScore = await db
+        .select()
+        .from(listings)
+        .where(and(eq(listings.isActive, true), inArray(listings.id, newIds)));
+      for (const l of toScore) {
+        try { await scoreAndSaveListing(l, true /* skipAI */); } catch { /* skip */ }
+      }
+      // Full AI score all new listings
+      console.log(`[Deal ${deal.id}] AI-Bewertung für ${toScore.length} neue Inserate…`);
+      const aiResults = await Promise.allSettled(
+        toScore.map((l) => scoreAndSaveListing(l, false /* full AI */))
+      );
+      aiScored = aiResults.filter((r) => r.status === 'fulfilled').length;
+    }
+
+    // ── Step 4: Re-query all matching listings (DB + newly scraped) ───────────
+    const allRows = await db
+      .select()
+      .from(listings)
+      .innerJoin(scores, eq(listings.id, scores.listingId))
+      .where(and(...dbConditions))
+      .orderBy(desc(scores.combinedScore))
+      .limit(200);
+
+    // AI-score top existing listings that only have heuristic scores (up to 10 more)
+    const needsAi = allRows
+      .filter((r) => r.scores.aiScore == null && !newIds.includes(r.listings.id))
+      .slice(0, 10);
+    if (needsAi.length > 0) {
+      console.log(`[Deal ${deal.id}] AI-Bewertung für ${needsAi.length} weitere Inserate aus DB…`);
+      const more = await Promise.allSettled(
+        needsAi.map((r) => scoreAndSaveListing(r.listings, false))
+      );
+      aiScored += more.filter((r) => r.status === 'fulfilled').length;
+    }
+
+    // ── Step 5: Final query with fresh scores, take top 50 ────────────────────
+    const finalRows = await db
+      .select()
+      .from(listings)
+      .innerJoin(scores, eq(listings.id, scores.listingId))
+      .where(and(...dbConditions))
+      .orderBy(desc(scores.combinedScore))
+      .limit(50);
 
     // Save as deal results
     await saveDealResults(
       deal.id,
-      top.map((r) => ({
+      finalRows.map((r) => ({
         listingId: r.listings.id,
         marginMinChf: r.scores.estimatedMarginMinChf,
         marginMaxChf: r.scores.estimatedMarginMaxChf,
@@ -107,13 +169,13 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      scraped: scrapeResult.listings.length,
-      scored,
-      withinBudget: withinBudget.length,
-      topResults: top.length,
+      fromDb: existingRows.length,
+      scraped,
+      aiScored,
+      topResults: finalRows.length,
     });
   } catch (err) {
-    console.error('Deal search failed:', err);
+    console.error('Deal-Suche fehlgeschlagen:', err);
     return NextResponse.json({ error: String(err) }, { status: 500 });
   }
 }

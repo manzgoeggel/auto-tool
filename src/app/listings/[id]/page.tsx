@@ -18,7 +18,6 @@ import {
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
 import { ScoreBadge } from "@/components/score-badge";
 import { ImportCalculator } from "@/components/import-calculator";
 import { formatPrice, formatMileage, timeAgo } from "@/lib/format";
@@ -68,14 +67,6 @@ export default async function ListingDetailPage({
         isVatDeductible: listing.vatDeductible || false,
         eurChfRate,
       }).grandTotalChf
-    : null;
-
-  // Recompute margins using live landed cost
-  const liveMarginMin = liveLandedCostChf != null && score?.estimatedResaleMinChf != null
-    ? score.estimatedResaleMinChf - liveLandedCostChf
-    : null;
-  const liveMarginMax = liveLandedCostChf != null && score?.estimatedResaleMaxChf != null
-    ? score.estimatedResaleMaxChf - liveLandedCostChf
     : null;
 
   const specs = [
@@ -181,56 +172,14 @@ export default async function ListingDetailPage({
         </div>
       </div>
 
-      <div className="grid md:grid-cols-2 gap-6">
-        {/* Import calculator */}
-        {listing.priceEur && (
-          <ImportCalculator
-            priceEur={listing.priceEur}
-            isVatDeductible={listing.vatDeductible || false}
-            eurChfRate={eurChfRate}
-          />
-        )}
-
-        {/* Margin estimate */}
-        {score && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-sm font-semibold">Margin Estimate</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Landed cost (incl. all fees)</span>
-                <span className="font-medium">
-                  {liveLandedCostChf != null ? formatPrice(liveLandedCostChf, "CHF") : "N/A"}
-                </span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Est. Swiss resale range</span>
-                <span className="font-medium">
-                  {score.estimatedResaleMinChf != null && score.estimatedResaleMaxChf != null
-                    ? `${formatPrice(score.estimatedResaleMinChf, "CHF")} – ${formatPrice(score.estimatedResaleMaxChf, "CHF")}`
-                    : "N/A"}
-                </span>
-              </div>
-              <Separator />
-              <div className="flex justify-between text-lg">
-                <span className="font-semibold">Est. margin</span>
-                <span
-                  className={
-                    liveMarginMin != null && liveMarginMin > 0
-                      ? "font-bold text-emerald-600 dark:text-emerald-400"
-                      : "font-bold text-red-600 dark:text-red-400"
-                  }
-                >
-                  {liveMarginMin != null && liveMarginMax != null
-                    ? `${formatPrice(liveMarginMin, "CHF")} – ${formatPrice(liveMarginMax, "CHF")}`
-                    : "N/A"}
-                </span>
-              </div>
-            </CardContent>
-          </Card>
-        )}
-      </div>
+      {/* Import calculator */}
+      {listing.priceEur && (
+        <ImportCalculator
+          priceEur={listing.priceEur}
+          isVatDeductible={listing.vatDeductible || false}
+          eurChfRate={eurChfRate}
+        />
+      )}
 
       {/* AI Analysis */}
       {score && (score.aiExplanation || (score.highlights && (score.highlights as string[]).length > 0) || (score.redFlags && (score.redFlags as string[]).length > 0)) && (
