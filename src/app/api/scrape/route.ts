@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getActiveConfigs, getConfigById } from '@/lib/db/queries/configs';
+import { getActiveConfigs, getConfigById, stampConfigScraped } from '@/lib/db/queries/configs';
 import { scrapeMobileDe } from '@/lib/scraper/mobile-de';
 import { upsertListing, getExistingExternalIds, getUnscoredListings } from '@/lib/db/queries/listings';
 import { scoreAndSaveListing } from '@/lib/scoring/combined';
@@ -64,6 +64,8 @@ export async function POST(request: NextRequest) {
             console.error(`Failed to upsert listing ${listing.externalId}:`, err);
           }
         }
+
+        await stampConfigScraped(config.id);
 
         results.push({
           configId: config.id,

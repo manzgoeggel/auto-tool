@@ -57,6 +57,17 @@ function SortIcon({ col, current, order }: { col: SortKey; current: SortKey; ord
     : <ChevronDown className="ml-1 h-3 w-3 inline" />;
 }
 
+function toCet(iso: string | null): string | null {
+  if (!iso) return null;
+  return new Date(iso).toLocaleString("de-CH", {
+    timeZone: "Europe/Zurich",
+    day: "2-digit",
+    month: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 const COUNTRY_FLAG: Record<string, string> = {
   DE: "🇩🇪", AT: "🇦🇹", CH: "🇨🇭", FR: "🇫🇷", IT: "🇮🇹",
   NL: "🇳🇱", BE: "🇧🇪", ES: "🇪🇸", PT: "🇵🇹", PL: "🇵🇱",
@@ -105,7 +116,7 @@ export default function ListingsPage() {
   const [rescoreMsg, setRescoreMsg] = useState<string | null>(null);
   const [scraping, setScraping] = useState(false);
   const [page, setPage] = useState(1);
-  const [sortBy, setSortBy] = useState<SortKey>("combined_score");
+  const [sortBy, setSortBy] = useState<SortKey>("first_seen");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
   const [search, setSearch] = useState("");
   const [vatOnly, setVatOnly] = useState(false);
@@ -307,6 +318,11 @@ export default function ListingsPage() {
                           <span className="text-[11px] text-muted-foreground/50">{l.location}</span>
                         )}
                       </div>
+                      {l.firstSeenAt && (
+                        <div className="text-[10px] text-muted-foreground/40 mt-0.5 tabular-nums">
+                          {toCet(l.firstSeenAt)} CET
+                        </div>
+                      )}
                     </td>
 
                     {/* Asking Price */}

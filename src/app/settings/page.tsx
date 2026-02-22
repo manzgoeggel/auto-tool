@@ -30,7 +30,20 @@ interface Config {
   transmissions: string[];
   minExpectedMarginChf: number | null;
   isActive: boolean;
+  lastScrapedAt: string | null;
   createdAt: string;
+}
+
+function toCet(iso: string | null): string {
+  if (!iso) return "Never";
+  return new Date(iso).toLocaleString("de-CH", {
+    timeZone: "Europe/Zurich",
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }) + " CET";
 }
 
 export default function SettingsPage() {
@@ -355,6 +368,9 @@ export default function SettingsPage() {
                         <span>{config.fuelTypes.join(", ")}</span>
                       )}
                     </div>
+                    <p className="text-xs text-muted-foreground/60">
+                      Last scraped: <span className={config.lastScrapedAt ? "text-muted-foreground" : ""}>{toCet(config.lastScrapedAt)}</span>
+                    </p>
                   </div>
 
                   <div className="flex items-center gap-1">

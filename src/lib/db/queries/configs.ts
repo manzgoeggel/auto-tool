@@ -44,6 +44,13 @@ export async function createConfig(data: SearchConfigInput) {
   return result[0];
 }
 
+export async function stampConfigScraped(id: number) {
+  await db
+    .update(searchConfigs)
+    .set({ lastScrapedAt: new Date(), updatedAt: new Date() })
+    .where(eq(searchConfigs.id, id));
+}
+
 export async function updateConfig(id: number, data: Partial<SearchConfigInput> & { isActive?: boolean }) {
   const result = await db
     .update(searchConfigs)

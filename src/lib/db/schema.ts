@@ -14,6 +14,7 @@ export const searchConfigs = pgTable('search_configs', {
   transmissions: jsonb('transmissions').$type<string[]>().default([]),
   minExpectedMarginChf: integer('min_expected_margin_chf'),
   isActive: boolean('is_active').default(true),
+  lastScrapedAt: timestamp('last_scraped_at'),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow(),
 });
