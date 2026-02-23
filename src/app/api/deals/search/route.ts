@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDealById, saveDealResults } from '@/lib/db/queries/deals';
 import { upsertListing, getExistingExternalIds } from '@/lib/db/queries/listings';
-import { scrapeMobileDe } from '@/lib/scraper/mobile-de';
+import { scrapeMobileDeViaApify } from '@/lib/scraper/apify-mobile-de';
 import { scoreAndSaveListing } from '@/lib/scoring/combined';
 import { updateBenchmarksFromListings } from '@/lib/db/queries/benchmarks';
 import { getOrFetchAutoscoutPrice } from '@/lib/db/queries/autoscout';
@@ -88,11 +88,10 @@ export async function POST(request: NextRequest) {
       };
 
       const existingIds = await getExistingExternalIds();
-      const scrapeResult = await scrapeMobileDe(
+      const scrapeResult = await scrapeMobileDeViaApify(
         syntheticConfig,
         scrapePages,
         existingIds,
-        1,
         { vatOnly: deal.vatOnly ?? true },
       );
       scraped = scrapeResult.listings.length;

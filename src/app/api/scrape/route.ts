@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getActiveConfigs, getConfigById, stampConfigScraped } from '@/lib/db/queries/configs';
-import { scrapeMobileDe } from '@/lib/scraper/mobile-de';
+import { scrapeMobileDeViaApify } from '@/lib/scraper/apify-mobile-de';
 import { upsertListing, getExistingExternalIds, getUnscoredListings } from '@/lib/db/queries/listings';
 import { scoreAndSaveListing } from '@/lib/scoring/combined';
 import { updateBenchmarksFromListings } from '@/lib/db/queries/benchmarks';
@@ -13,7 +13,6 @@ export async function POST(request: NextRequest) {
     const configId = body.configId;
     // Allow caller to control how many pages to fetch (default 50, max 200)
     const maxPages = Math.min(parseInt(body.maxPages || '50', 10), 200);
-    const startPage = Math.max(1, parseInt(body.startPage || '1', 10));
 
     let configs;
     if (configId) {
@@ -42,7 +41,7 @@ export async function POST(request: NextRequest) {
 
     for (const config of configs) {
       try {
-        const scrapeResult = await scrapeMobileDe(config, maxPages, existingIds, startPage);
+        const scrapeResult = await scrapeMobileDeViaApify(config, maxPages, existingIds);
 
         console.log(`\n=== Scraped listings for config "${config.name}" ===`);
         scrapeResult.listings.forEach((l, i) => {
@@ -75,9 +74,7 @@ export async function POST(request: NextRequest) {
           newCount: scrapeResult.newCount,
           updatedCount: scrapeResult.updatedCount,
           upserted,
-          startPage,
           pagesScraped: scrapeResult.pagesScraped,
-          nextStartPage: startPage + scrapeResult.pagesScraped,
           totalResults: scrapeResult.totalResults,
           errors: scrapeResult.errors,
         });

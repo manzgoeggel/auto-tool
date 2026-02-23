@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getActiveConfigs, stampConfigScraped } from '@/lib/db/queries/configs';
-import { scrapeMobileDe } from '@/lib/scraper/mobile-de';
+import { scrapeMobileDeViaApify } from '@/lib/scraper/apify-mobile-de';
 import { upsertListing } from '@/lib/db/queries/listings';
 import { updateBenchmarksFromListings } from '@/lib/db/queries/benchmarks';
 import { getUnscoredListings } from '@/lib/db/queries/listings';
@@ -29,7 +29,7 @@ export async function GET(request: NextRequest) {
     // Phase 1: Scrape
     for (const config of configs) {
       try {
-        const result = await scrapeMobileDe(config, 5); // Limit pages for cron
+        const result = await scrapeMobileDeViaApify(config, 5); // Limit pages for cron
         totalListings += result.listings.length;
 
         for (const listing of result.listings) {
