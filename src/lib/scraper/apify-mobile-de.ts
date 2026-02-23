@@ -210,8 +210,9 @@ function normaliseTransmission(raw: string): string {
 /**
  * Scrape mobile.de via the Apify `3x1t/mobile-de-scraper-ppr` actor.
  *
- * Constructs one search URL per page range using buildSearchUrl(), submits
- * it to Apify, and waits synchronously for results (up to 300 seconds).
+ * Mobile.de caps each page at 20 results. To get multiple pages we pass all
+ * page URLs as separate entries in `start_urls` so Apify fetches them in
+ * parallel (one actor run per URL in the array).
  *
  * Returns the same shape as the old scrapeMobileDe() so callers need no changes.
  */
@@ -231,13 +232,21 @@ export async function scrapeMobileDeViaApify(
   const token = getApifyToken();
   const errors: string[] = [];
 
-  // Build the first-page search URL — Apify will paginate internally
-  const searchUrl = buildSearchUrl(config, 1, options);
-  console.log(`[apify] Submitting to Apify actor: ${searchUrl} (max ${maxPages} pages)`);
+  // Build one URL per page and submit all as start_urls so Apify fetches
+  // them in parallel. mobile.de caps each page at 20 listings, so
+  // maxPages=5 → up to 100 results.
+  const startUrls = Array.from({ length: maxPages }, (_, i) => ({
+    url: buildSearchUrl(config, i + 1, options),
+  }));
+
+  console.log(
+    `[apify] Submitting ${startUrls.length} page URLs to Apify actor` +
+    ` (pages 1–${maxPages}, up to ${maxPages * 20} listings)`,
+  );
 
   const input = {
-    start_urls: [{ url: searchUrl }],
-    scrape_page_limit: maxPages,
+    start_urls: startUrls,
+    scrape_page_limit: 1, // each URL is already a specific page
   };
 
   let rawItems: Record<string, unknown>[] = [];
