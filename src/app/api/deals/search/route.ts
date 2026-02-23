@@ -5,7 +5,7 @@ import { scrapeMobileDeViaApify } from '@/lib/scraper/apify-mobile-de';
 import { scoreAndSaveListing } from '@/lib/scoring/combined';
 import { updateBenchmarksFromListings } from '@/lib/db/queries/benchmarks';
 import { getOrFetchAutoscoutPrice } from '@/lib/db/queries/autoscout';
-import { getMinPriceFromAutoscout24 } from '@/lib/scraper/autoscout24';
+import { getMinPriceViaApify } from '@/lib/scraper/apify-autoscout24';
 import { db } from '@/lib/db';
 import { listings, scores } from '@/lib/db/schema';
 import { eq, and, lte, gte, isNotNull, desc, sql, or, inArray } from 'drizzle-orm';
@@ -195,7 +195,7 @@ export async function POST(request: NextRequest) {
             brand,
             model || null,
             deal.yearMin ?? null,
-            getMinPriceFromAutoscout24,
+            getMinPriceViaApify,
           );
           autoscoutPrices[mapKey] = result
             ? { minPriceChf: result.minPriceChf, listingUrl: result.listingUrl }

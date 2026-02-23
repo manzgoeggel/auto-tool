@@ -12,7 +12,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getOrFetchAutoscoutPrice } from '@/lib/db/queries/autoscout';
-import { getMinPriceFromAutoscout24 } from '@/lib/scraper/autoscout24';
+import { getMinPriceViaApify } from '@/lib/scraper/apify-autoscout24';
 
 export const maxDuration = 60;
 
@@ -33,7 +33,7 @@ export async function POST(request: NextRequest) {
       brand,
       model ?? null,
       yearFrom ?? null,
-      getMinPriceFromAutoscout24,
+      getMinPriceViaApify,
     );
 
     if (!result) {
