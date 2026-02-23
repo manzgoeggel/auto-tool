@@ -13,7 +13,8 @@ import {
   RefreshCw,
   AlertTriangle,
   ShieldCheck,
-  Filter,
+  Play,
+  Loader2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -41,8 +42,7 @@ interface ListingRow {
   score: {
     combinedScore: number | null;
     priceDeltaPercent: number | null;
-    estimatedMarginMinChf: number | null;
-    estimatedMarginMaxChf: number | null;
+    totalLandedCostChf: number | null;
     redFlags: string[] | null;
     variantClassification: string | null;
   } | null;
@@ -55,6 +55,17 @@ function SortIcon({ col, current, order }: { col: SortKey; current: SortKey; ord
   return order === "asc"
     ? <ChevronUp className="ml-1 h-3 w-3 inline" />
     : <ChevronDown className="ml-1 h-3 w-3 inline" />;
+}
+
+function toCet(iso: string | null): string | null {
+  if (!iso) return null;
+  return new Date(iso).toLocaleString("de-CH", {
+    timeZone: "Europe/Zurich",
+    day: "2-digit",
+    month: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 const COUNTRY_FLAG: Record<string, string> = {
@@ -103,8 +114,9 @@ export default function ListingsPage() {
   const [loading, setLoading] = useState(true);
   const [rescoring, setRescoring] = useState(false);
   const [rescoreMsg, setRescoreMsg] = useState<string | null>(null);
+  const [scraping, setScraping] = useState(false);
   const [page, setPage] = useState(1);
-  const [sortBy, setSortBy] = useState<SortKey>("combined_score");
+  const [sortBy, setSortBy] = useState<SortKey>("first_seen");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
   const [search, setSearch] = useState("");
   const [vatOnly, setVatOnly] = useState(false);
@@ -126,6 +138,25 @@ export default function ListingsPage() {
     if (col === sortBy) setSortOrder(o => o === "desc" ? "asc" : "desc");
     else { setSortBy(col); setSortOrder("desc"); }
     setPage(1);
+  }
+
+  async function handleScrape() {
+    setScraping(true);
+    setRescoreMsg(null);
+    try {
+      const res = await fetch("/api/scrape", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ maxPages: 20 }),
+      });
+      const json = await res.json();
+      if (json.success) {
+        const newCount = json.results?.reduce((s: number, r: { newCount?: number }) => s + (r.newCount || 0), 0) ?? 0;
+        setRescoreMsg(`✓ ${newCount} new listings`);
+        fetchListings();
+      } else setRescoreMsg("Scrape failed");
+    } catch { setRescoreMsg("Scrape failed"); }
+    finally { setScraping(false); }
   }
 
   async function handleRescoreAll() {
@@ -161,13 +192,17 @@ export default function ListingsPage() {
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Listings</h1>
-          {data && <p className="text-sm text-muted-foreground mt-0.5">{data.total} total</p>}
+          {data && <p className="text-sm text-muted-foreground mt-0.5">{data.total} listings</p>}
         </div>
         <div className="flex items-center gap-2">
           {rescoreMsg && <span className="text-xs text-muted-foreground">{rescoreMsg}</span>}
-          <Button variant="outline" size="sm" onClick={handleRescoreAll} disabled={rescoring} className="gap-1.5">
+          <Button variant="outline" size="sm" onClick={handleRescoreAll} disabled={rescoring || scraping} className="gap-1.5">
             <RefreshCw className={`h-3.5 w-3.5 ${rescoring ? "animate-spin" : ""}`} />
             {rescoring ? "Rescoring…" : "Rescore All"}
+          </Button>
+          <Button size="sm" onClick={handleScrape} disabled={scraping || rescoring} className="gap-1.5">
+            {scraping ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
+            {scraping ? "Scraping…" : "Run Scraper"}
           </Button>
         </div>
       </div>
@@ -209,6 +244,8 @@ export default function ListingsPage() {
                   Car
                 </th>
                 <Th col="price" label="Asking Price" right />
+                {/* Landed cost — not sortable */}
+                <th className="h-9 px-4 text-xs font-medium text-muted-foreground text-right whitespace-nowrap">Landed (CHF)</th>
                 {/* VAT — not sortable */}
                 <th className="h-9 px-4 text-xs font-medium text-muted-foreground text-center whitespace-nowrap">VAT</th>
                 <Th col="year" label="Year" />
@@ -216,7 +253,6 @@ export default function ListingsPage() {
                 <th className="h-9 px-4 text-xs font-medium text-muted-foreground text-center whitespace-nowrap">Seller</th>
                 {/* Flags — not sortable */}
                 <th className="h-9 px-4 text-xs font-medium text-muted-foreground text-center whitespace-nowrap">Flags</th>
-                <Th col="margin" label="Est. Margin" right />
                 {/* Country — not sortable */}
                 <th className="h-9 px-4 text-xs font-medium text-muted-foreground text-left whitespace-nowrap">Country</th>
                 <th className="h-9 w-9 px-2" />
@@ -240,9 +276,6 @@ export default function ListingsPage() {
                 const s = row.score;
                 const redFlagCount = s?.redFlags?.length ?? 0;
                 const priceDelta = s?.priceDeltaPercent;
-                const marginMin = s?.estimatedMarginMinChf;
-                const marginMax = s?.estimatedMarginMaxChf;
-                const marginPositive = marginMin != null && marginMin > 0;
 
                 // Build display name: prefer AI variant classification, fall back to title
                 const displayName = s?.variantClassification || l.title;
@@ -285,6 +318,11 @@ export default function ListingsPage() {
                           <span className="text-[11px] text-muted-foreground/50">{l.location}</span>
                         )}
                       </div>
+                      {l.firstSeenAt && (
+                        <div className="text-[10px] text-muted-foreground/40 mt-0.5 tabular-nums">
+                          {toCet(l.firstSeenAt)} CET
+                        </div>
+                      )}
                     </td>
 
                     {/* Asking Price */}
@@ -292,6 +330,17 @@ export default function ListingsPage() {
                       <span className="font-semibold tabular-nums text-foreground">
                         {l.priceEur ? formatPrice(l.priceEur, "EUR") : "—"}
                       </span>
+                    </td>
+
+                    {/* Landed cost */}
+                    <td className="px-4 py-2.5 text-right whitespace-nowrap">
+                      {s?.totalLandedCostChf != null ? (
+                        <span className="font-semibold tabular-nums text-foreground">
+                          {formatPrice(s.totalLandedCostChf, "CHF")}
+                        </span>
+                      ) : (
+                        <span className="text-muted-foreground/30 text-xs">—</span>
+                      )}
                     </td>
 
                     {/* VAT */}
@@ -334,20 +383,6 @@ export default function ListingsPage() {
                           <span className="text-muted-foreground/25 text-xs">—</span>
                         )}
                       </div>
-                    </td>
-
-                    {/* Est. Margin */}
-                    <td className="px-4 py-2.5 text-right whitespace-nowrap">
-                      {marginMin != null && marginMax != null ? (
-                        <div className={`font-semibold tabular-nums text-sm leading-tight ${marginPositive ? "text-emerald-600 dark:text-emerald-400" : "text-red-500 dark:text-red-400"}`}>
-                          <div>{marginPositive ? "+" : ""}{formatPrice(marginMin, "CHF")}</div>
-                          {marginMax !== marginMin && (
-                            <div className="text-[10px] opacity-60">→ {formatPrice(marginMax, "CHF")}</div>
-                          )}
-                        </div>
-                      ) : (
-                        <span className="text-xs text-muted-foreground">—</span>
-                      )}
                     </td>
 
                     {/* Country */}

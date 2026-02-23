@@ -12,6 +12,8 @@ export async function scrapeMobileDe(
   config: SearchConfig,
   maxPages: number = 10,
   existingIds: Set<string> = new Set(),
+  startPage: number = 1,
+  options: { vatOnly?: boolean } = {},
 ): Promise<{
   listings: RawListing[];
   newCount: number;
@@ -22,7 +24,7 @@ export async function scrapeMobileDe(
 }> {
   const allListings: RawListing[] = [];
   const errors: string[] = [];
-  let page = 1;
+  let page = Math.max(1, startPage);
   let hasMorePages = true;
   let totalResults: number | undefined;
   let consecutiveEmpty = 0;
@@ -38,7 +40,7 @@ export async function scrapeMobileDe(
 
   while (hasMorePages && page <= maxPages) {
     try {
-      const url = buildSearchUrl(config, page);
+      const url = buildSearchUrl(config, page, options);
       console.log(`[scraper] Page ${page}: ${url}`);
 
       const { html, setCookie } = await fetchUnblocked(url, {

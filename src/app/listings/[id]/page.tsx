@@ -18,7 +18,6 @@ import {
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
 import { ScoreBadge } from "@/components/score-badge";
 import { ImportCalculator } from "@/components/import-calculator";
 import { formatPrice, formatMileage, timeAgo } from "@/lib/format";
@@ -70,14 +69,6 @@ export default async function ListingDetailPage({
       }).grandTotalChf
     : null;
 
-  // Recompute margins using live landed cost
-  const liveMarginMin = liveLandedCostChf != null && score?.estimatedResaleMinChf != null
-    ? score.estimatedResaleMinChf - liveLandedCostChf
-    : null;
-  const liveMarginMax = liveLandedCostChf != null && score?.estimatedResaleMaxChf != null
-    ? score.estimatedResaleMaxChf - liveLandedCostChf
-    : null;
-
   const specs = [
     { icon: Calendar, label: "Year", value: listing.firstRegistrationYear?.toString() },
     { icon: Gauge, label: "Mileage", value: listing.mileageKm != null ? formatMileage(listing.mileageKm) : null },
@@ -89,20 +80,27 @@ export default async function ListingDetailPage({
 
   return (
     <div className="max-w-5xl mx-auto space-y-6">
-      {/* Back button */}
-      <Link
-        href="/listings"
-        className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
-      >
-        <ArrowLeft className="h-4 w-4" />
-        Back to listings
-      </Link>
+      {/* Nav bar */}
+      <div className="flex items-center justify-between">
+        <Button variant="outline" size="sm" className="gap-2" asChild>
+          <Link href="/listings">
+            <ArrowLeft className="h-4 w-4" />
+            Back to listings
+          </Link>
+        </Button>
+        <Button size="sm" className="gap-2" asChild>
+          <a href={listing.listingUrl} target="_blank" rel="noopener noreferrer">
+            <ExternalLink className="h-3.5 w-3.5" />
+            View on mobile.de
+          </a>
+        </Button>
+      </div>
 
       {/* Header */}
       <div className="flex flex-col md:flex-row gap-6">
         {/* Image */}
         <div className="md:w-1/2">
-          <div className="relative aspect-[4/3] rounded-xl overflow-hidden bg-muted">
+          <div className="relative aspect-[4/3] rounded-xl overflow-hidden bg-muted ring-1 ring-border/50">
             {listing.imageUrl ? (
               <img
                 src={listing.imageUrl}
@@ -118,7 +116,7 @@ export default async function ListingDetailPage({
         </div>
 
         {/* Info */}
-        <div className="md:w-1/2 space-y-4">
+        <div className="md:w-1/2 flex flex-col gap-4">
           <div className="flex items-start justify-between gap-4">
             <h1 className="text-2xl font-bold leading-tight">{listing.title}</h1>
             {score?.combinedScore != null && (
@@ -127,13 +125,13 @@ export default async function ListingDetailPage({
           </div>
 
           {/* Price */}
-          <div>
-            <div className="text-3xl font-bold">
+          <div className="rounded-lg bg-muted/50 px-4 py-3 border border-border/50">
+            <div className="text-3xl font-bold tabular-nums">
               {listing.priceEur ? formatPrice(listing.priceEur, "EUR") : "N/A"}
             </div>
             {priceChf && (
-              <p className="text-lg text-muted-foreground">
-                {formatPrice(priceChf, "CHF")}
+              <p className="text-base text-muted-foreground tabular-nums mt-0.5">
+                ≈ {formatPrice(priceChf, "CHF")}
               </p>
             )}
           </div>
@@ -143,7 +141,7 @@ export default async function ListingDetailPage({
             {listing.vatDeductible && (
               <Badge className="bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30">
                 <ShieldCheck className="mr-1 h-3.5 w-3.5" />
-                VAT deductible (19%)
+                VAT deductible
               </Badge>
             )}
             {score?.priceDeltaPercent != null && score.priceDeltaPercent < -5 && (
@@ -159,79 +157,29 @@ export default async function ListingDetailPage({
           </div>
 
           {/* Specs grid */}
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-2 gap-2">
             {specs.map((spec) => {
               const Icon = spec.icon;
               return (
-                <div key={spec.label} className="flex items-center gap-2 text-sm">
-                  <Icon className="h-4 w-4 text-muted-foreground" />
-                  <span className="text-muted-foreground">{spec.label}:</span>
-                  <span className="font-medium">{spec.value}</span>
+                <div key={spec.label} className="flex items-center gap-2 text-sm rounded-md bg-muted/40 px-3 py-2 border border-border/30">
+                  <Icon className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                  <span className="text-muted-foreground shrink-0 text-xs">{spec.label}</span>
+                  <span className="font-medium ml-auto text-right truncate text-xs">{spec.value}</span>
                 </div>
               );
             })}
           </div>
-
-          {/* CTA */}
-          <Button size="lg" className="w-full" asChild>
-            <a href={listing.listingUrl} target="_blank" rel="noopener noreferrer">
-              <ExternalLink className="mr-2 h-4 w-4" />
-              View on mobile.de
-            </a>
-          </Button>
         </div>
       </div>
 
-      <div className="grid md:grid-cols-2 gap-6">
-        {/* Import calculator */}
-        {listing.priceEur && (
-          <ImportCalculator
-            priceEur={listing.priceEur}
-            isVatDeductible={listing.vatDeductible || false}
-            eurChfRate={eurChfRate}
-          />
-        )}
-
-        {/* Margin estimate */}
-        {score && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-sm font-semibold">Margin Estimate</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Landed cost (incl. all fees)</span>
-                <span className="font-medium">
-                  {liveLandedCostChf != null ? formatPrice(liveLandedCostChf, "CHF") : "N/A"}
-                </span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Est. Swiss resale range</span>
-                <span className="font-medium">
-                  {score.estimatedResaleMinChf != null && score.estimatedResaleMaxChf != null
-                    ? `${formatPrice(score.estimatedResaleMinChf, "CHF")} – ${formatPrice(score.estimatedResaleMaxChf, "CHF")}`
-                    : "N/A"}
-                </span>
-              </div>
-              <Separator />
-              <div className="flex justify-between text-lg">
-                <span className="font-semibold">Est. margin</span>
-                <span
-                  className={
-                    liveMarginMin != null && liveMarginMin > 0
-                      ? "font-bold text-emerald-600 dark:text-emerald-400"
-                      : "font-bold text-red-600 dark:text-red-400"
-                  }
-                >
-                  {liveMarginMin != null && liveMarginMax != null
-                    ? `${formatPrice(liveMarginMin, "CHF")} – ${formatPrice(liveMarginMax, "CHF")}`
-                    : "N/A"}
-                </span>
-              </div>
-            </CardContent>
-          </Card>
-        )}
-      </div>
+      {/* Import calculator */}
+      {listing.priceEur && (
+        <ImportCalculator
+          priceEur={listing.priceEur}
+          isVatDeductible={listing.vatDeductible || false}
+          eurChfRate={eurChfRate}
+        />
+      )}
 
       {/* AI Analysis */}
       {score && (score.aiExplanation || (score.highlights && (score.highlights as string[]).length > 0) || (score.redFlags && (score.redFlags as string[]).length > 0)) && (

@@ -1,7 +1,7 @@
 import { MOBILE_DE_MAKE_IDS, MOBILE_DE_MODEL_IDS, FUEL_TYPE_MAP, TRANSMISSION_MAP } from '@/lib/constants';
 import type { SearchConfig } from '@/lib/db/schema';
 
-export function buildSearchUrl(config: SearchConfig, page: number = 1): string {
+export function buildSearchUrl(config: SearchConfig, page: number = 1, options: { vatOnly?: boolean } = {}): string {
   const params = new URLSearchParams();
 
   params.set('dam', '0'); // Exclude damaged
@@ -89,8 +89,9 @@ export function buildSearchUrl(config: SearchConfig, page: number = 1): string {
 
   // Filter for VAT-deductible listings only (MwSt. ausweisbar)
   // Confirmed parameter: vat=1 (not mwst=true which is ignored by mobile.de)
-  // Source: https://apify.com/3x1t/mobile-de-scraper URL examples
-  params.set('vat', '1');
+  if (options.vatOnly !== false) {
+    params.set('vat', '1');
+  }
 
   return `https://suchen.mobile.de/fahrzeuge/search.html?${params.toString()}`;
 }

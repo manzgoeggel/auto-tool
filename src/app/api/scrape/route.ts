@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getActiveConfigs, getConfigById } from '@/lib/db/queries/configs';
+import { getActiveConfigs, getConfigById, stampConfigScraped } from '@/lib/db/queries/configs';
 import { scrapeMobileDe } from '@/lib/scraper/mobile-de';
-import { upsertListing, getExistingExternalIds } from '@/lib/db/queries/listings';
+import { upsertListing, getExistingExternalIds, getUnscoredListings } from '@/lib/db/queries/listings';
+import { scoreAndSaveListing } from '@/lib/scoring/combined';
+import { updateBenchmarksFromListings } from '@/lib/db/queries/benchmarks';
 
 export const maxDuration = 300;
 
@@ -9,8 +11,9 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json().catch(() => ({}));
     const configId = body.configId;
-    // Allow caller to control how many pages to fetch (default 20, max 50)
-    const maxPages = Math.min(parseInt(body.maxPages || '20', 10), 50);
+    // Allow caller to control how many pages to fetch (default 50, max 200)
+    const maxPages = Math.min(parseInt(body.maxPages || '50', 10), 200);
+    const startPage = Math.max(1, parseInt(body.startPage || '1', 10));
 
     let configs;
     if (configId) {
@@ -39,7 +42,7 @@ export async function POST(request: NextRequest) {
 
     for (const config of configs) {
       try {
-        const scrapeResult = await scrapeMobileDe(config, maxPages, existingIds);
+        const scrapeResult = await scrapeMobileDe(config, maxPages, existingIds, startPage);
 
         console.log(`\n=== Scraped listings for config "${config.name}" ===`);
         scrapeResult.listings.forEach((l, i) => {
@@ -63,6 +66,8 @@ export async function POST(request: NextRequest) {
           }
         }
 
+        await stampConfigScraped(config.id);
+
         results.push({
           configId: config.id,
           configName: config.name,
@@ -70,7 +75,9 @@ export async function POST(request: NextRequest) {
           newCount: scrapeResult.newCount,
           updatedCount: scrapeResult.updatedCount,
           upserted,
+          startPage,
           pagesScraped: scrapeResult.pagesScraped,
+          nextStartPage: startPage + scrapeResult.pagesScraped,
           totalResults: scrapeResult.totalResults,
           errors: scrapeResult.errors,
         });
@@ -84,10 +91,28 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // Auto-score new listings after scraping
+    await updateBenchmarksFromListings();
+    const toScore = await getUnscoredListings();
+    let scored = 0;
+    let scoreErrors = 0;
+    const SCORE_BATCH = 5;
+    for (let i = 0; i < toScore.length; i += SCORE_BATCH) {
+      const batch = toScore.slice(i, i + SCORE_BATCH);
+      const settled = await Promise.allSettled(batch.map((l) => scoreAndSaveListing(l)));
+      for (const r of settled) {
+        if (r.status === 'fulfilled') scored++;
+        else { scoreErrors++; console.error('[scrape] Score error:', r.reason); }
+      }
+    }
+    console.log(`[scrape] Auto-scored ${scored} new listings (${scoreErrors} errors)`);
+
     return NextResponse.json({
       success: true,
       results,
       totalConfigs: configs.length,
+      scored,
+      scoreErrors,
     });
   } catch (error) {
     console.error('Scrape failed:', error);

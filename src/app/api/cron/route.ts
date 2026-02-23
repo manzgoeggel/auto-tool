@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getActiveConfigs } from '@/lib/db/queries/configs';
+import { getActiveConfigs, stampConfigScraped } from '@/lib/db/queries/configs';
 import { scrapeMobileDe } from '@/lib/scraper/mobile-de';
 import { upsertListing } from '@/lib/db/queries/listings';
 import { updateBenchmarksFromListings } from '@/lib/db/queries/benchmarks';
@@ -40,6 +40,7 @@ export async function GET(request: NextRequest) {
             errors.push(`Upsert ${listing.externalId}: ${err}`);
           }
         }
+        await stampConfigScraped(config.id);
       } catch (err) {
         errors.push(`Scrape ${config.name}: ${err}`);
       }
