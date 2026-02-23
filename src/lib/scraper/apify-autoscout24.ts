@@ -1,20 +1,48 @@
 /**
  * apify-autoscout24.ts
  *
- * Replaces the Bright Data / Cheerio AutoScout24.ch scraper with the Apify
- * `3x1t/autoscout24-scraper-ppr` actor (Pay-Per-Result).
+ * Fetches the minimum listing price on AutoScout24.ch via the Apify
+ * `3x1t/autoscout24-scraper-ppr` actor.
  *
- * The actor accepts AutoScout24 search page URLs and returns structured
- * listing objects — no HTML parsing required.
+ * REAL INPUT SCHEMA (confirmed from live runs):
+ *   startUrls             string[]  — plain URL strings (NOT {url} objects!)
+ *   lightningMode         boolean   — true (fast mode, confirmed working)
+ *   resultLimitPerThread  integer   — max results per URL (use 20 — first page only)
+ *   reviewLimit           integer   — 0 (skip reviews)
+ *   customRunFailureThresholdPercent integer — 50
+ *
+ *   NOTE: snake_case variants (start_urls, scrape_page_limit) return 0 results.
+ *         Always use camelCase: startUrls, resultLimitPerThread.
+ *
+ * REAL OUTPUT SCHEMA (confirmed from live dataset):
+ *   id               string  — UUID (e.g. "bbf93ddb-bbe1-4244-...")
+ *   url              string  — listing detail URL
+ *   title            string
+ *   brand            string
+ *   model            string
+ *   previewImage     string
+ *   images           string[]
+ *   price.total.amount   number — price in local currency (CHF for .ch)
+ *   price.total.currency string
+ *   attributes       object — keyed by English label:
+ *     "Mileage"            → "20 km"
+ *     "First Registration" → "12/2025"
+ *     "Power"              → "137 kW"
+ *     "Fuel"               → "Gasoline"
+ *     "Transmission"       → "Automatic"
+ *     "Vehicle condition"  → "Used"
+ *     "Colour"             → "Green"
+ *     "Category"           → "Off-Road/Pick-up"
+ *   features         string[]
+ *   description      string
+ *   dealerDetails.name            string
+ *   dealerDetails.sellerType      string — "Dealer" | "Private"
+ *   dealerDetails.address         string — "Street, City, CountryCode"
+ *   dealerDetails.addressStructured.city string
+ *   dealerDetails.addressStructured.countryCode string
  *
  * Required env var:
- *   APIFY_TOKEN  — same token used for the mobile.de actor
- *
- * Apify run-sync endpoint (waits for completion, max 300 s):
- *   POST https://api.apify.com/v2/acts/3x1t~autoscout24-scraper-ppr/run-sync-get-dataset-items
- *
- * We only need the cheapest listing (sorted by price asc) — so we submit one
- * page URL and cap scrape_page_limit at 1. This is the cheapest/fastest call.
+ *   APIFY_TOKEN  — same token as mobile.de actor
  */
 
 import { toAutoscout24BrandSlug, toAutoscout24ModelSlug } from '@/lib/constants';
@@ -31,7 +59,6 @@ function getApifyToken(): string {
 
 /**
  * Build an AutoScout24.ch search URL sorted by price ascending.
- * Mirrors the logic in the old autoscout24.ts scraper.
  */
 function buildAs24SearchUrl(
   brand: string,
@@ -61,22 +88,17 @@ function extractMinPrice(items: Record<string, any>[], searchUrl: string): AS24M
   let cheapest: AS24MinPrice | null = null;
 
   for (const item of items) {
-    // Price: actor may return it as `price`, `priceChf`, `priceCHF`, `prices.publicPrice`
-    const rawPrice: number =
-      Number(
-        item.price ??
-        item.priceChf ??
-        item.priceCHF ??
-        item.prices?.publicPrice ??
-        item.prices?.cash ??
-        0,
-      );
+    // Real output: price.total.amount
+    const rawPrice: number = Number(
+      item.price?.total?.amount ??
+      item.price?.amount ??
+      item.price ??
+      0,
+    );
 
     if (!rawPrice || rawPrice < 1000) continue;
 
-    // Listing URL
-    const listingUrl: string =
-      item.url ?? item.link ?? item.detailUrl ?? searchUrl;
+    const listingUrl: string = item.url ?? searchUrl;
 
     if (!cheapest || rawPrice < cheapest.minPriceChf) {
       cheapest = { minPriceChf: Math.round(rawPrice), listingUrl };
@@ -100,11 +122,16 @@ export async function getMinPriceViaApify(
   const token = getApifyToken();
   const searchUrl = buildAs24SearchUrl(brand, model, yearFrom);
 
-  console.log(`[apify-as24] Fetching min price via Apify: ${searchUrl}`);
+  console.log(`[apify-as24] Fetching min price: ${searchUrl}`);
 
+  // IMPORTANT: startUrls must be plain strings (not {url} objects),
+  // and lightningMode must be true. snake_case variants return 0 results.
   const input = {
-    start_urls: [{ url: searchUrl }],
-    scrape_page_limit: 1, // We only need the first page (cheapest-first sort)
+    startUrls: [searchUrl],
+    lightningMode: true,
+    resultLimitPerThread: 20, // first page only — sorted cheapest-first
+    reviewLimit: 0,
+    customRunFailureThresholdPercent: 50,
   };
 
   const endpoint =
@@ -135,7 +162,7 @@ export async function getMinPriceViaApify(
   }
 
   if (rawItems.length === 0) {
-    console.warn(`[apify-as24] No listings returned for ${brand} ${model ?? 'any'} (year≥${yearFrom ?? 'any'})`);
+    console.warn(`[apify-as24] No listings for ${brand} ${model ?? 'any'} (year≥${yearFrom ?? 'any'})`);
     return null;
   }
 
