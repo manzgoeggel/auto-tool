@@ -19,6 +19,10 @@ import {
   Check,
   Share2,
   RefreshCw,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
+  Eye,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -34,6 +38,13 @@ import { toast } from "sonner";
 import { formatPrice, formatMileage, timeAgo } from "@/lib/format";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
+
+interface AS24Price {
+  minPriceChf: number;
+  listingUrl: string;
+}
+
+type AS24PriceMap = Record<string, AS24Price | null>;
 
 interface Deal {
   id: number;
@@ -62,6 +73,7 @@ interface DealResult {
     priceEur: number | null;
     mileageKm: number | null;
     firstRegistrationYear: number | null;
+    firstRegistrationMonth: number | null;
     fuelType: string | null;
     transmission: string | null;
     power: string | null;
@@ -71,13 +83,17 @@ interface DealResult {
     listingUrl: string;
     vatDeductible: boolean | null;
     hasAccidentDamage: boolean | null;
+    firstSeenAt: string | null;
   };
   score: {
     combinedScore: number | null;
     totalLandedCostChf: number | null;
     redFlags: string[] | null;
+    highlights: string[] | null;
     variantClassification: string | null;
     aiExplanation: string | null;
+    estimatedMarginMinChf: number | null;
+    estimatedMarginMaxChf: number | null;
   } | null;
   dealListing: {
     combinedScore: number | null;
@@ -85,21 +101,50 @@ interface DealResult {
   };
 }
 
+type SortKey = "score" | "price" | "landed" | "margin" | "seen";
+type SortDir = "asc" | "desc";
+
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
 function ScoreRing({ score }: { score: number }) {
-  const r = 13;
+  const r = 14;
   const circ = 2 * Math.PI * r;
   const fill = circ * (score / 100);
-  const color = score >= 75 ? "#10b981" : score >= 55 ? "#f59e0b" : score >= 35 ? "#6b7280" : "#ef4444";
+  const color =
+    score >= 75
+      ? "#10b981"
+      : score >= 55
+      ? "#f59e0b"
+      : score >= 35
+      ? "#6b7280"
+      : "#ef4444";
   return (
     <div className="relative inline-flex items-center justify-center shrink-0">
-      <svg width="34" height="34" className="-rotate-90">
-        <circle cx="17" cy="17" r={r} fill="none" stroke="currentColor" strokeWidth="2.5" className="text-border" />
-        <circle cx="17" cy="17" r={r} fill="none" stroke={color} strokeWidth="2.5"
-          strokeDasharray={`${fill} ${circ}`} strokeLinecap="round" />
+      <svg width="36" height="36" className="-rotate-90">
+        <circle
+          cx="18"
+          cy="18"
+          r={r}
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.5"
+          className="text-border"
+        />
+        <circle
+          cx="18"
+          cy="18"
+          r={r}
+          fill="none"
+          stroke={color}
+          strokeWidth="2.5"
+          strokeDasharray={`${fill} ${circ}`}
+          strokeLinecap="round"
+        />
       </svg>
-      <span className="absolute text-[10px] font-bold tabular-nums" style={{ color }}>
+      <span
+        className="absolute text-[10px] font-bold tabular-nums"
+        style={{ color }}
+      >
         {Math.round(score)}
       </span>
     </div>
@@ -107,16 +152,36 @@ function ScoreRing({ score }: { score: number }) {
 }
 
 const COUNTRY_FLAG: Record<string, string> = {
-  DE: "🇩🇪", AT: "🇦🇹", CH: "🇨🇭", FR: "🇫🇷", IT: "🇮🇹",
-  NL: "🇳🇱", BE: "🇧🇪", ES: "🇪🇸", PT: "🇵🇹", PL: "🇵🇱",
+  DE: "🇩🇪",
+  AT: "🇦🇹",
+  CH: "🇨🇭",
+  FR: "🇫🇷",
+  IT: "🇮🇹",
+  NL: "🇳🇱",
+  BE: "🇧🇪",
+  ES: "🇪🇸",
+  PT: "🇵🇹",
+  PL: "🇵🇱",
 };
 
 // ─── Deal Form ────────────────────────────────────────────────────────────────
 
 const KNOWN_BRANDS = [
-  "Porsche", "BMW", "Mercedes-Benz", "Audi", "Ferrari", "Lamborghini",
-  "McLaren", "Maserati", "Bentley", "Rolls-Royce", "Aston Martin",
-  "Jaguar", "Land Rover", "Lotus", "Alpine",
+  "Porsche",
+  "BMW",
+  "Mercedes-Benz",
+  "Audi",
+  "Ferrari",
+  "Lamborghini",
+  "McLaren",
+  "Maserati",
+  "Bentley",
+  "Rolls-Royce",
+  "Aston Martin",
+  "Jaguar",
+  "Land Rover",
+  "Lotus",
+  "Alpine",
 ];
 
 const MODELS_BY_BRAND: Record<string, string[]> = {
@@ -155,7 +220,9 @@ function DealForm({ initial, onSave, onCancel }: DealFormProps) {
   const [models, setModels] = useState<string[]>(initial?.models ?? []);
   const [yearMin, setYearMin] = useState(String(initial?.yearMin ?? ""));
   const [yearMax, setYearMax] = useState(String(initial?.yearMax ?? ""));
-  const [mileageMax, setMileageMax] = useState(String(initial?.mileageMax ?? ""));
+  const [mileageMax, setMileageMax] = useState(
+    String(initial?.mileageMax ?? "")
+  );
   const [vatOnly, setVatOnly] = useState(initial?.vatOnly ?? true);
   const [noAccident, setNoAccident] = useState(initial?.noAccident ?? true);
   const [notes, setNotes] = useState(initial?.notes ?? "");
@@ -165,7 +232,7 @@ function DealForm({ initial, onSave, onCancel }: DealFormProps) {
 
   function toggleBrand(brand: string) {
     setBrands((prev) =>
-      prev.includes(brand) ? prev.filter((b) => b !== brand) : [...prev, brand],
+      prev.includes(brand) ? prev.filter((b) => b !== brand) : [...prev, brand]
     );
     setModels((prev) =>
       prev.filter((m) => {
@@ -173,13 +240,15 @@ function DealForm({ initial, onSave, onCancel }: DealFormProps) {
           ? brands.filter((b) => b !== brand)
           : [...brands, brand];
         return remaining.some((b) => MODELS_BY_BRAND[b]?.includes(m));
-      }),
+      })
     );
   }
 
   function toggleModel(model: string) {
     setModels((prev) =>
-      prev.includes(model) ? prev.filter((m) => m !== model) : [...prev, model],
+      prev.includes(model)
+        ? prev.filter((m) => m !== model)
+        : [...prev, model]
     );
   }
 
@@ -211,26 +280,41 @@ function DealForm({ initial, onSave, onCancel }: DealFormProps) {
       {/* Name + Budget */}
       <div className="grid grid-cols-2 gap-3">
         <div className="col-span-2 space-y-1">
-          <label className="text-xs font-medium text-muted-foreground">Deal-Name</label>
-          <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="z.B. GT3 Projekt" required />
+          <label className="text-xs font-medium text-muted-foreground">
+            Deal-Name
+          </label>
+          <Input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="z.B. GT3 Projekt"
+            required
+          />
         </div>
         <div className="col-span-2 space-y-1">
-          <label className="text-xs font-medium text-muted-foreground">Max. Budget (CHF inkl. Import)</label>
+          <label className="text-xs font-medium text-muted-foreground">
+            Max. Budget (CHF inkl. Import)
+          </label>
           <Input
-            type="number" min={1} value={budgetChf}
+            type="number"
+            min={1}
+            value={budgetChf}
             onChange={(e) => setBudgetChf(e.target.value)}
-            placeholder="z.B. 180000" required
+            placeholder="z.B. 180000"
+            required
           />
         </div>
       </div>
 
       {/* Brands */}
       <div className="space-y-2">
-        <label className="text-xs font-medium text-muted-foreground">Marken</label>
+        <label className="text-xs font-medium text-muted-foreground">
+          Marken
+        </label>
         <div className="flex flex-wrap gap-1.5">
           {KNOWN_BRANDS.map((brand) => (
             <button
-              key={brand} type="button"
+              key={brand}
+              type="button"
               onClick={() => toggleBrand(brand)}
               className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${
                 brands.includes(brand)
@@ -247,11 +331,14 @@ function DealForm({ initial, onSave, onCancel }: DealFormProps) {
       {/* Models */}
       {availableModels.length > 0 && (
         <div className="space-y-2">
-          <label className="text-xs font-medium text-muted-foreground">Modelle (optional — leer lassen für alle)</label>
+          <label className="text-xs font-medium text-muted-foreground">
+            Modelle (optional — leer lassen für alle)
+          </label>
           <div className="flex flex-wrap gap-1.5">
             {availableModels.map((model) => (
               <button
-                key={model} type="button"
+                key={model}
+                type="button"
                 onClick={() => toggleModel(model)}
                 className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${
                   models.includes(model)
@@ -269,16 +356,42 @@ function DealForm({ initial, onSave, onCancel }: DealFormProps) {
       {/* Year + Mileage */}
       <div className="grid grid-cols-3 gap-3">
         <div className="space-y-1">
-          <label className="text-xs font-medium text-muted-foreground">Baujahr von</label>
-          <Input type="number" min={1990} max={2025} value={yearMin} onChange={(e) => setYearMin(e.target.value)} placeholder="2018" />
+          <label className="text-xs font-medium text-muted-foreground">
+            Baujahr von
+          </label>
+          <Input
+            type="number"
+            min={1990}
+            max={2025}
+            value={yearMin}
+            onChange={(e) => setYearMin(e.target.value)}
+            placeholder="2018"
+          />
         </div>
         <div className="space-y-1">
-          <label className="text-xs font-medium text-muted-foreground">Baujahr bis</label>
-          <Input type="number" min={1990} max={2025} value={yearMax} onChange={(e) => setYearMax(e.target.value)} placeholder="2024" />
+          <label className="text-xs font-medium text-muted-foreground">
+            Baujahr bis
+          </label>
+          <Input
+            type="number"
+            min={1990}
+            max={2025}
+            value={yearMax}
+            onChange={(e) => setYearMax(e.target.value)}
+            placeholder="2024"
+          />
         </div>
         <div className="space-y-1">
-          <label className="text-xs font-medium text-muted-foreground">Max. km</label>
-          <Input type="number" min={0} value={mileageMax} onChange={(e) => setMileageMax(e.target.value)} placeholder="50000" />
+          <label className="text-xs font-medium text-muted-foreground">
+            Max. km
+          </label>
+          <Input
+            type="number"
+            min={0}
+            value={mileageMax}
+            onChange={(e) => setMileageMax(e.target.value)}
+            placeholder="50000"
+          />
         </div>
       </div>
 
@@ -318,21 +431,119 @@ function DealForm({ initial, onSave, onCancel }: DealFormProps) {
 
       {/* Notes */}
       <div className="space-y-1">
-        <label className="text-xs font-medium text-muted-foreground">Notizen (optional)</label>
-        <Input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Ausstattung, Farbe…" />
+        <label className="text-xs font-medium text-muted-foreground">
+          Notizen (optional)
+        </label>
+        <Input
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          placeholder="Ausstattung, Farbe…"
+        />
       </div>
 
       {/* Actions */}
       <div className="flex gap-2 pt-1">
         <Button type="submit" className="flex-1" disabled={saving}>
           {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-          {saving ? "Speichern…" : initial?.id ? "Änderungen speichern" : "Deal erstellen"}
+          {saving
+            ? "Speichern…"
+            : initial?.id
+            ? "Änderungen speichern"
+            : "Deal erstellen"}
         </Button>
-        <Button type="button" variant="outline" onClick={onCancel} disabled={saving}>
+        <Button
+          type="button"
+          variant="outline"
+          onClick={onCancel}
+          disabled={saving}
+        >
           Abbrechen
         </Button>
       </div>
     </form>
+  );
+}
+
+// ─── Margin delta display ─────────────────────────────────────────────────────
+
+function MarginDelta({
+  as24Price,
+  landedChf,
+}: {
+  as24Price: AS24Price | null | undefined;
+  landedChf: number | null | undefined;
+}) {
+  if (!as24Price || !landedChf) {
+    return <span className="text-muted-foreground/30 text-xs">—</span>;
+  }
+  const delta = as24Price.minPriceChf - landedChf;
+  const isPositive = delta > 0;
+  const colorClass =
+    delta >= 10_000
+      ? "text-emerald-600 dark:text-emerald-400"
+      : delta >= 5_000
+      ? "text-amber-600 dark:text-amber-400"
+      : delta >= 0
+      ? "text-muted-foreground"
+      : "text-red-500 dark:text-red-400";
+
+  return (
+    <div className="text-right">
+      <a
+        href={as24Price.listingUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="group/as24"
+        title="Günstigstes Inserat auf AutoScout24.ch"
+      >
+        <div className="tabular-nums text-xs font-medium text-muted-foreground group-hover/as24:text-foreground">
+          {formatPrice(as24Price.minPriceChf, "CHF")}
+        </div>
+        <div className={`tabular-nums text-[11px] font-semibold ${colorClass}`}>
+          {isPositive ? "+" : ""}
+          {formatPrice(delta, "CHF")}
+        </div>
+      </a>
+    </div>
+  );
+}
+
+// ─── Sortable column header ───────────────────────────────────────────────────
+
+function SortHeader({
+  label,
+  sortKey,
+  currentKey,
+  currentDir,
+  onSort,
+  className = "",
+}: {
+  label: string;
+  sortKey: SortKey;
+  currentKey: SortKey;
+  currentDir: SortDir;
+  onSort: (key: SortKey) => void;
+  className?: string;
+}) {
+  const active = currentKey === sortKey;
+  return (
+    <th
+      className={`h-8 px-3 text-xs font-medium text-muted-foreground cursor-pointer select-none hover:text-foreground transition-colors ${className}`}
+      onClick={() => onSort(sortKey)}
+    >
+      <span className="inline-flex items-center gap-1">
+        {label}
+        {active ? (
+          currentDir === "desc" ? (
+            <ArrowDown className="h-3 w-3" />
+          ) : (
+            <ArrowUp className="h-3 w-3" />
+          )
+        ) : (
+          <ArrowUpDown className="h-3 w-3 opacity-30" />
+        )}
+      </span>
+    </th>
   );
 }
 
@@ -342,10 +553,12 @@ function ResultRow({
   result,
   isPinned,
   onTogglePin,
+  as24Price,
 }: {
   result: DealResult;
   isPinned: boolean;
   onTogglePin: () => void;
+  as24Price: AS24Price | null | undefined;
 }) {
   const l = result.listing;
   const s = result.score;
@@ -355,18 +568,32 @@ function ResultRow({
   const countryCode = (l.country ?? "DE").toUpperCase();
   const flag = COUNTRY_FLAG[countryCode] ?? "🌍";
 
+  const [aiExpanded, setAiExpanded] = useState(false);
+
+  // Days since first seen
+  const daysSinceSeen = l.firstSeenAt
+    ? Math.floor(
+        (Date.now() - new Date(l.firstSeenAt).getTime()) / (1000 * 60 * 60 * 24)
+      )
+    : null;
+
   return (
-    <tr className={`group border-b border-border/40 last:border-0 transition-colors hover:bg-muted/25 ${isPinned ? "bg-amber-500/5" : ""}`}>
+    <tr
+      className={`group border-b border-border/40 last:border-0 transition-colors hover:bg-muted/25 ${
+        isPinned ? "bg-amber-500/5" : ""
+      }`}
+    >
       {/* Score */}
       <td className="px-3 py-2.5 text-center w-12">
-        {score != null
-          ? <ScoreRing score={score} />
-          : <span className="text-xs text-muted-foreground">—</span>
-        }
+        {score != null ? (
+          <ScoreRing score={score} />
+        ) : (
+          <span className="text-xs text-muted-foreground">—</span>
+        )}
       </td>
 
       {/* Car */}
-      <td className="px-3 py-2.5 min-w-[160px] max-w-[260px]">
+      <td className="px-3 py-2.5 min-w-[160px] max-w-[240px]">
         <Link
           href={`/listings/${l.id}`}
           className="font-medium text-sm text-foreground hover:underline line-clamp-1 block"
@@ -377,10 +604,43 @@ function ResultRow({
           {l.firstRegistrationYear && <span>{l.firstRegistrationYear}</span>}
           {l.mileageKm && <span>{formatMileage(l.mileageKm)}</span>}
           {l.power && <span>{l.power}</span>}
-          <span>{flag} {countryCode}</span>
+          <span>
+            {flag} {countryCode}
+          </span>
         </div>
-        {s?.aiExplanation && s.aiExplanation !== 'AI analysis pending' && (
-          <p className="text-[10px] text-muted-foreground/60 mt-0.5 line-clamp-1 italic">{s.aiExplanation}</p>
+        {/* AI explanation — expandable */}
+        {s?.aiExplanation &&
+          s.aiExplanation !== "AI analysis pending" && (
+            <div
+              className="cursor-pointer"
+              onClick={() => setAiExpanded((v) => !v)}
+            >
+              <p
+                className={`text-[10px] text-muted-foreground/60 mt-0.5 italic transition-all ${
+                  aiExpanded ? "" : "line-clamp-1"
+                }`}
+              >
+                {s.aiExplanation}
+              </p>
+              {!aiExpanded && s.aiExplanation.length > 80 && (
+                <span className="text-[9px] text-muted-foreground/40 hover:text-muted-foreground">
+                  mehr anzeigen
+                </span>
+              )}
+            </div>
+          )}
+        {/* Highlights */}
+        {aiExpanded && s?.highlights && s.highlights.length > 0 && (
+          <div className="mt-1 flex flex-wrap gap-1">
+            {s.highlights.slice(0, 3).map((h, i) => (
+              <span
+                key={i}
+                className="text-[9px] bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 rounded px-1.5 py-0.5"
+              >
+                {h}
+              </span>
+            ))}
+          </div>
         )}
       </td>
 
@@ -390,15 +650,45 @@ function ResultRow({
           {l.priceEur ? formatPrice(l.priceEur, "EUR") : "—"}
         </span>
         {l.vatDeductible && (
-          <div className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium">+VAT</div>
+          <div className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium">
+            +VAT
+          </div>
         )}
       </td>
 
       {/* Landed CHF */}
       <td className="px-3 py-2.5 text-right whitespace-nowrap">
-        <span className="tabular-nums text-sm">
+        <span className="tabular-nums text-sm font-medium">
           {landed ? formatPrice(landed, "CHF") : "—"}
         </span>
+      </td>
+
+      {/* AS24 min price + margin delta */}
+      <td className="px-3 py-2.5 text-right whitespace-nowrap">
+        <MarginDelta as24Price={as24Price} landedChf={landed} />
+      </td>
+
+      {/* First seen */}
+      <td className="px-3 py-2.5 text-right whitespace-nowrap">
+        {daysSinceSeen !== null ? (
+          <span
+            className={`text-xs tabular-nums ${
+              daysSinceSeen <= 1
+                ? "text-emerald-600 dark:text-emerald-400 font-semibold"
+                : daysSinceSeen <= 7
+                ? "text-foreground"
+                : "text-muted-foreground/60"
+            }`}
+          >
+            {daysSinceSeen === 0
+              ? "heute"
+              : daysSinceSeen === 1
+              ? "gestern"
+              : `${daysSinceSeen}d`}
+          </span>
+        ) : (
+          <span className="text-muted-foreground/30 text-xs">—</span>
+        )}
       </td>
 
       {/* Flags */}
@@ -425,10 +715,17 @@ function ResultRow({
         <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
           <button
             onClick={onTogglePin}
-            className={`p-1 rounded transition-colors ${isPinned ? "text-amber-500 hover:text-amber-600" : "text-muted-foreground/40 hover:text-amber-500"}`}
+            className={`p-1 rounded transition-colors ${
+              isPinned
+                ? "text-amber-500 hover:text-amber-600"
+                : "text-muted-foreground/40 hover:text-amber-500"
+            }`}
             title={isPinned ? "Anheftung entfernen" : "Anheften"}
           >
-            <Pin className="h-3.5 w-3.5" fill={isPinned ? "currentColor" : "none"} />
+            <Pin
+              className="h-3.5 w-3.5"
+              fill={isPinned ? "currentColor" : "none"}
+            />
           </button>
           <a
             href={l.listingUrl}
@@ -441,6 +738,98 @@ function ResultRow({
         </div>
       </td>
     </tr>
+  );
+}
+
+// ─── Best opportunity badge ───────────────────────────────────────────────────
+
+function BestOpportunityBadge({
+  results,
+  as24Prices,
+  pinnedIds,
+}: {
+  results: DealResult[];
+  as24Prices: AS24PriceMap;
+  pinnedIds: number[];
+}) {
+  // Find the result with the best positive margin delta
+  let bestDelta: number | null = null;
+  let bestResult: DealResult | null = null;
+
+  for (const r of results) {
+    const landed = r.score?.totalLandedCostChf;
+    if (!landed) continue;
+    // Find the AS24 price key for this result
+    // We use the first matching key we find
+    let as24: AS24Price | null = null;
+    for (const [, val] of Object.entries(as24Prices)) {
+      if (val) {
+        as24 = val;
+        break;
+      }
+    }
+    if (!as24) continue;
+    const delta = as24.minPriceChf - landed;
+    if (bestDelta === null || delta > bestDelta) {
+      bestDelta = delta;
+      bestResult = r;
+    }
+  }
+
+  if (!bestDelta || bestDelta <= 0 || !bestResult) return null;
+
+  const title =
+    bestResult.score?.variantClassification || bestResult.listing.title;
+
+  return (
+    <div className="flex items-center gap-1.5 mt-2 text-xs text-emerald-700 dark:text-emerald-400">
+      <TrendingUp className="h-3.5 w-3.5 shrink-0" />
+      <span>
+        Beste Marge:{" "}
+        <span className="font-semibold">
+          +{formatPrice(bestDelta, "CHF")}
+        </span>{" "}
+        ·{" "}
+        <span className="text-muted-foreground line-clamp-1 inline">
+          {title}
+        </span>
+      </span>
+    </div>
+  );
+}
+
+// ─── Mini result tiles (collapsed card preview) ───────────────────────────────
+
+function MiniResultTile({ result }: { result: DealResult }) {
+  const s = result.score;
+  const score = s?.combinedScore ?? result.dealListing.combinedScore;
+  const color =
+    !score
+      ? "#6b7280"
+      : score >= 75
+      ? "#10b981"
+      : score >= 55
+      ? "#f59e0b"
+      : "#6b7280";
+  const title =
+    s?.variantClassification?.split(" ").slice(0, 3).join(" ") ||
+    result.listing.title.split(" ").slice(0, 3).join(" ");
+
+  return (
+    <div className="flex items-center gap-1.5 bg-muted/40 rounded px-2 py-1 min-w-0">
+      <span
+        className="text-[10px] font-bold tabular-nums shrink-0"
+        style={{ color }}
+      >
+        {score ? Math.round(score) : "—"}
+      </span>
+      <span className="text-[10px] text-muted-foreground truncate">{title}</span>
+      {result.listing.firstRegistrationYear && (
+        <span className="text-[9px] text-muted-foreground/50 shrink-0">
+          {result.listing.firstRegistrationYear}
+        </span>
+      )}
+    </div>
   );
 }
 
@@ -463,6 +852,9 @@ function DealCard({
   const [searching, setSearching] = useState(false);
   const [results, setResults] = useState<DealResult[] | null>(null);
   const [loadingResults, setLoadingResults] = useState(false);
+  const [as24Prices, setAs24Prices] = useState<AS24PriceMap>({});
+  const [sortKey, setSortKey] = useState<SortKey>("score");
+  const [sortDir, setSortDir] = useState<SortDir>("desc");
 
   async function triggerSearch(forceRefresh = false) {
     setSearching(true);
@@ -478,11 +870,22 @@ function DealCard({
         const parts = [`${data.topResults} Treffer`];
         if (data.scraped > 0) parts.push(`${data.scraped} neue Inserate`);
         if (data.aiScored > 0) parts.push(`${data.aiScored} KI-bewertet`);
-        toast.success(parts.join(' · '));
+        // AS24 price info
+        const as24Count = Object.values(data.autoscoutPrices ?? {}).filter(
+          Boolean
+        ).length;
+        if (as24Count > 0) parts.push(`${as24Count} AS24-Preise`);
+        toast.success(parts.join(" · "));
+        // Store AS24 prices
+        if (data.autoscoutPrices) {
+          setAs24Prices(data.autoscoutPrices);
+        }
         onSearch();
         fetchResults();
       } else {
-        toast.error("Suche fehlgeschlagen: " + (data.error || "Unbekannter Fehler"));
+        toast.error(
+          "Suche fehlgeschlagen: " + (data.error || "Unbekannter Fehler")
+        );
       }
     } catch {
       toast.error("Suche fehlgeschlagen");
@@ -522,18 +925,102 @@ function DealCard({
     toast.success("Link kopiert!");
   }
 
+  function handleSort(key: SortKey) {
+    if (sortKey === key) {
+      setSortDir((d) => (d === "desc" ? "asc" : "desc"));
+    } else {
+      setSortKey(key);
+      setSortDir("desc");
+    }
+  }
+
   const pinnedIds = deal.pinnedListingIds ?? [];
+
+  // Get the AS24 price applicable to a result
+  function getAs24ForResult(result: DealResult): AS24Price | null | undefined {
+    // Try to match by brand/model from the deal definition
+    // Primary: use deal's brands/models to look up the price map
+    for (const brand of deal.brands) {
+      if (deal.models.length > 0) {
+        for (const model of deal.models) {
+          const key = `${brand}/${model}`;
+          if (key in as24Prices) return as24Prices[key];
+        }
+      }
+      // Brand-only key
+      if (brand in as24Prices) return as24Prices[brand];
+    }
+    // Fallback: first entry in map
+    const vals = Object.values(as24Prices);
+    return vals.length > 0 ? vals[0] : undefined;
+  }
 
   const sortedResults = results
     ? [...results].sort((a, b) => {
+        // Pinned always first
         const aPinned = pinnedIds.includes(a.listing.id) ? 1 : 0;
         const bPinned = pinnedIds.includes(b.listing.id) ? 1 : 0;
         if (bPinned !== aPinned) return bPinned - aPinned;
-        const aScore = a.score?.combinedScore ?? a.dealListing.combinedScore ?? 0;
-        const bScore = b.score?.combinedScore ?? b.dealListing.combinedScore ?? 0;
-        return bScore - aScore;
+
+        const dir = sortDir === "desc" ? -1 : 1;
+
+        if (sortKey === "score") {
+          const aS = a.score?.combinedScore ?? a.dealListing.combinedScore ?? 0;
+          const bS = b.score?.combinedScore ?? b.dealListing.combinedScore ?? 0;
+          return (bS - aS) * dir;
+        }
+        if (sortKey === "price") {
+          return (
+            ((a.listing.priceEur ?? Infinity) - (b.listing.priceEur ?? Infinity)) *
+            dir
+          );
+        }
+        if (sortKey === "landed") {
+          return (
+            ((a.score?.totalLandedCostChf ?? Infinity) -
+              (b.score?.totalLandedCostChf ?? Infinity)) *
+            dir
+          );
+        }
+        if (sortKey === "margin") {
+          const aAs24 = getAs24ForResult(a);
+          const bAs24 = getAs24ForResult(b);
+          const aDelta = aAs24
+            ? aAs24.minPriceChf - (a.score?.totalLandedCostChf ?? 0)
+            : -Infinity;
+          const bDelta = bAs24
+            ? bAs24.minPriceChf - (b.score?.totalLandedCostChf ?? 0)
+            : -Infinity;
+          return (bDelta - aDelta) * dir;
+        }
+        if (sortKey === "seen") {
+          const aT = a.listing.firstSeenAt
+            ? new Date(a.listing.firstSeenAt).getTime()
+            : 0;
+          const bT = b.listing.firstSeenAt
+            ? new Date(b.listing.firstSeenAt).getTime()
+            : 0;
+          return (bT - aT) * dir;
+        }
+        return 0;
       })
     : null;
+
+  // Preview: top 3 non-pinned results for collapsed card
+  const previewResults = results
+    ? results
+        .filter((r) => !pinnedIds.includes(r.listing.id))
+        .sort((a, b) => {
+          const aS =
+            a.score?.combinedScore ?? a.dealListing.combinedScore ?? 0;
+          const bS =
+            b.score?.combinedScore ?? b.dealListing.combinedScore ?? 0;
+          return bS - aS;
+        })
+        .slice(0, 3)
+    : [];
+
+  const hasAs24Data = Object.values(as24Prices).some(Boolean);
 
   return (
     <Card className="overflow-hidden">
@@ -544,16 +1031,26 @@ function DealCard({
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
               <h3 className="font-semibold text-base">{deal.name}</h3>
-              <Badge variant="outline" className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 border-emerald-500/30">
+              <Badge
+                variant="outline"
+                className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 border-emerald-500/30"
+              >
                 {formatPrice(deal.budgetChf, "CHF")} Budget
               </Badge>
               {deal.vatOnly && (
-                <Badge variant="outline" className="text-xs text-emerald-600 dark:text-emerald-400 border-emerald-500/30 gap-0.5">
-                  <ShieldCheck className="h-3 w-3" />MwSt. ausweisbar
+                <Badge
+                  variant="outline"
+                  className="text-xs text-emerald-600 dark:text-emerald-400 border-emerald-500/30 gap-0.5"
+                >
+                  <ShieldCheck className="h-3 w-3" />
+                  MwSt. ausweisbar
                 </Badge>
               )}
               {deal.noAccident && (
-                <Badge variant="outline" className="text-xs text-muted-foreground border-border/50 gap-0.5">
+                <Badge
+                  variant="outline"
+                  className="text-xs text-muted-foreground border-border/50 gap-0.5"
+                >
                   Kein Unfall
                 </Badge>
               )}
@@ -562,30 +1059,72 @@ function DealCard({
             {/* Brand/model tags */}
             <div className="flex flex-wrap gap-1 mt-1.5">
               {deal.brands.map((b) => (
-                <Badge key={b} variant="secondary" className="text-xs">{b}</Badge>
+                <Badge key={b} variant="secondary" className="text-xs">
+                  {b}
+                </Badge>
               ))}
               {deal.models.map((m) => (
-                <Badge key={m} variant="outline" className="text-xs">{m}</Badge>
+                <Badge key={m} variant="outline" className="text-xs">
+                  {m}
+                </Badge>
               ))}
             </div>
 
             {/* Meta */}
             <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1.5 text-xs text-muted-foreground">
-              {deal.yearMin && deal.yearMax && <span>{deal.yearMin}–{deal.yearMax}</span>}
-              {deal.yearMin && !deal.yearMax && <span>ab {deal.yearMin}</span>}
-              {deal.mileageMax && <span>max. {(deal.mileageMax / 1000).toFixed(0)}k km</span>}
+              {deal.yearMin && deal.yearMax && (
+                <span>
+                  {deal.yearMin}–{deal.yearMax}
+                </span>
+              )}
+              {deal.yearMin && !deal.yearMax && (
+                <span>ab {deal.yearMin}</span>
+              )}
+              {deal.mileageMax && (
+                <span>max. {(deal.mileageMax / 1000).toFixed(0)}k km</span>
+              )}
               {deal.lastSearchAt && (
                 <span className="flex items-center gap-1">
                   <Clock className="h-3 w-3" />
                   Zuletzt {timeAgo(deal.lastSearchAt)}
-                  {deal.lastResultCount != null && ` · ${deal.lastResultCount} Treffer`}
+                  {deal.lastResultCount != null &&
+                    ` · ${deal.lastResultCount} Treffer`}
                 </span>
               )}
-              {!deal.lastSearchAt && <span className="italic text-muted-foreground/50">Noch nicht gesucht</span>}
+              {!deal.lastSearchAt && (
+                <span className="italic text-muted-foreground/50">
+                  Noch nicht gesucht
+                </span>
+              )}
             </div>
 
             {deal.notes && (
-              <p className="mt-1.5 text-xs text-muted-foreground/70 italic">{deal.notes}</p>
+              <p className="mt-1.5 text-xs text-muted-foreground/70 italic">
+                {deal.notes}
+              </p>
+            )}
+
+            {/* Best opportunity badge */}
+            {results && results.length > 0 && hasAs24Data && (
+              <BestOpportunityBadge
+                results={results}
+                as24Prices={as24Prices}
+                pinnedIds={pinnedIds}
+              />
+            )}
+
+            {/* Preview mini-tiles (collapsed state) */}
+            {!expanded && previewResults.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mt-2">
+                {previewResults.map((r) => (
+                  <MiniResultTile key={r.listing.id} result={r} />
+                ))}
+                {(deal.lastResultCount ?? 0) > 3 && (
+                  <span className="text-[10px] text-muted-foreground/50 self-center">
+                    +{(deal.lastResultCount ?? 0) - 3} weitere
+                  </span>
+                )}
+              </div>
             )}
 
             {/* Share link */}
@@ -595,7 +1134,9 @@ function DealCard({
                 className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
               >
                 <Share2 className="h-3 w-3" />
-                <span className="underline underline-offset-2">/share/{deal.shareId}</span>
+                <span className="underline underline-offset-2">
+                  /share/{deal.shareId}
+                </span>
               </button>
             )}
           </div>
@@ -608,10 +1149,11 @@ function DealCard({
               disabled={searching}
               className="gap-1.5 h-8 px-3"
             >
-              {searching
-                ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                : <Search className="h-3.5 w-3.5" />
-              }
+              {searching ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Search className="h-3.5 w-3.5" />
+              )}
               {searching ? "Suche läuft…" : "Suchen"}
             </Button>
             <Button
@@ -620,17 +1162,39 @@ function DealCard({
               onClick={() => triggerSearch(true)}
               disabled={searching}
               className="h-8 w-8 p-0"
-              title="Neu von mobile.de laden"
+              title="Neu von mobile.de laden (mehr Seiten)"
             >
               <RefreshCw className="h-3.5 w-3.5" />
             </Button>
-            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleExpand} title={expanded ? "Einklappen" : "Ergebnisse anzeigen"}>
-              {expanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8"
+              onClick={handleExpand}
+              title={expanded ? "Einklappen" : "Ergebnisse anzeigen"}
+            >
+              {expanded ? (
+                <ChevronUp className="h-4 w-4" />
+              ) : (
+                <ChevronDown className="h-4 w-4" />
+              )}
             </Button>
-            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={onEdit} title="Bearbeiten">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8"
+              onClick={onEdit}
+              title="Bearbeiten"
+            >
               <Pencil className="h-4 w-4" />
             </Button>
-            <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive" onClick={onDelete} title="Archivieren">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 text-destructive hover:text-destructive"
+              onClick={onDelete}
+              title="Archivieren"
+            >
               <Trash2 className="h-4 w-4" />
             </Button>
           </div>
@@ -649,7 +1213,9 @@ function DealCard({
             <div className="flex flex-col items-center justify-center py-10 text-center gap-2">
               <TrendingUp className="h-8 w-8 text-muted-foreground/30" />
               <p className="text-sm text-muted-foreground">
-                {deal.lastSearchAt ? "Keine Treffer im Budget." : "Auf «Suchen» klicken, um Deals zu finden."}
+                {deal.lastSearchAt
+                  ? "Keine Treffer im Budget."
+                  : "Auf «Suchen» klicken, um Deals zu finden."}
               </p>
             </div>
           ) : (
@@ -657,11 +1223,52 @@ function DealCard({
               <table className="w-full text-sm border-collapse">
                 <thead>
                   <tr className="border-b bg-muted/20">
-                    <th className="h-8 px-3 text-xs font-medium text-muted-foreground text-center">Score</th>
-                    <th className="h-8 px-3 text-xs font-medium text-muted-foreground text-left">Fahrzeug</th>
-                    <th className="h-8 px-3 text-xs font-medium text-muted-foreground text-right whitespace-nowrap">Preis</th>
-                    <th className="h-8 px-3 text-xs font-medium text-muted-foreground text-right whitespace-nowrap">Landed CHF</th>
-                    <th className="h-8 px-3 text-xs font-medium text-muted-foreground text-center">Hinweise</th>
+                    <SortHeader
+                      label="Score"
+                      sortKey="score"
+                      currentKey={sortKey}
+                      currentDir={sortDir}
+                      onSort={handleSort}
+                      className="text-center"
+                    />
+                    <th className="h-8 px-3 text-xs font-medium text-muted-foreground text-left">
+                      Fahrzeug
+                    </th>
+                    <SortHeader
+                      label="Preis"
+                      sortKey="price"
+                      currentKey={sortKey}
+                      currentDir={sortDir}
+                      onSort={handleSort}
+                      className="text-right whitespace-nowrap"
+                    />
+                    <SortHeader
+                      label="Landed CHF"
+                      sortKey="landed"
+                      currentKey={sortKey}
+                      currentDir={sortDir}
+                      onSort={handleSort}
+                      className="text-right whitespace-nowrap"
+                    />
+                    <SortHeader
+                      label="AS24 / Δ Marge"
+                      sortKey="margin"
+                      currentKey={sortKey}
+                      currentDir={sortDir}
+                      onSort={handleSort}
+                      className="text-right whitespace-nowrap"
+                    />
+                    <SortHeader
+                      label="Gesehen"
+                      sortKey="seen"
+                      currentKey={sortKey}
+                      currentDir={sortDir}
+                      onSort={handleSort}
+                      className="text-right whitespace-nowrap"
+                    />
+                    <th className="h-8 px-3 text-xs font-medium text-muted-foreground text-center">
+                      Hinweise
+                    </th>
                     <th className="h-8 w-16" />
                   </tr>
                 </thead>
@@ -671,14 +1278,28 @@ function DealCard({
                       key={result.listing.id}
                       result={result}
                       isPinned={pinnedIds.includes(result.listing.id)}
-                      onTogglePin={() => onTogglePin(deal.id, result.listing.id)}
+                      onTogglePin={() =>
+                        onTogglePin(deal.id, result.listing.id)
+                      }
+                      as24Price={getAs24ForResult(result)}
                     />
                   ))}
                 </tbody>
               </table>
-              <div className="px-4 py-2 text-xs text-muted-foreground border-t bg-muted/10">
-                {sortedResults.length} Inserate · Budget CHF {(deal.budgetChf / 1000).toFixed(0)}k
-                {pinnedIds.length > 0 && ` · ${pinnedIds.length} angeheftet`}
+              <div className="px-4 py-2 text-xs text-muted-foreground border-t bg-muted/10 flex items-center gap-3 flex-wrap">
+                <span>
+                  {sortedResults.length} Inserate · Budget CHF{" "}
+                  {(deal.budgetChf / 1000).toFixed(0)}k
+                </span>
+                {pinnedIds.length > 0 && (
+                  <span>{pinnedIds.length} angeheftet</span>
+                )}
+                {hasAs24Data && (
+                  <span className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
+                    <Eye className="h-3 w-3" />
+                    AS24.ch Preise geladen
+                  </span>
+                )}
               </div>
             </div>
           )}
@@ -707,7 +1328,9 @@ export default function DealsPage() {
     }
   }, []);
 
-  useEffect(() => { fetchDeals(); }, [fetchDeals]);
+  useEffect(() => {
+    fetchDeals();
+  }, [fetchDeals]);
 
   async function handleSave(data: DealFormData) {
     const isUpdate = !!data.id;
@@ -745,22 +1368,28 @@ export default function DealsPage() {
     if (res.ok) {
       const { pinnedListingIds } = await res.json();
       setDeals((prev) =>
-        prev.map((d) => (d.id === dealId ? { ...d, pinnedListingIds } : d)),
+        prev.map((d) => (d.id === dealId ? { ...d, pinnedListingIds } : d))
       );
     }
   }
 
   return (
-    <div className="max-w-5xl mx-auto space-y-6">
+    <div className="max-w-6xl mx-auto space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Deals</h1>
           <p className="text-muted-foreground mt-1">
-            Budget und Zielmarken festlegen — die besten Inserate im Importbudget finden.
+            Budget und Zielmarken festlegen — die besten Inserate im
+            Importbudget finden.
           </p>
         </div>
-        <Button onClick={() => { setEditingDeal(null); setDialogOpen(true); }}>
+        <Button
+          onClick={() => {
+            setEditingDeal(null);
+            setDialogOpen(true);
+          }}
+        >
           <Plus className="mr-2 h-4 w-4" />
           Neuer Deal
         </Button>
@@ -776,12 +1405,17 @@ export default function DealsPage() {
       >
         <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>{editingDeal ? "Deal bearbeiten" : "Neuer Deal"}</DialogTitle>
+            <DialogTitle>
+              {editingDeal ? "Deal bearbeiten" : "Neuer Deal"}
+            </DialogTitle>
           </DialogHeader>
           <DealForm
             initial={editingDeal ?? undefined}
             onSave={handleSave}
-            onCancel={() => { setDialogOpen(false); setEditingDeal(null); }}
+            onCancel={() => {
+              setDialogOpen(false);
+              setEditingDeal(null);
+            }}
           />
         </DialogContent>
       </Dialog>
@@ -817,7 +1451,10 @@ export default function DealsPage() {
             <DealCard
               key={deal.id}
               deal={deal}
-              onEdit={() => { setEditingDeal(deal); setDialogOpen(true); }}
+              onEdit={() => {
+                setEditingDeal(deal);
+                setDialogOpen(true);
+              }}
               onDelete={() => handleDelete(deal.id)}
               onSearch={fetchDeals}
               onTogglePin={handleTogglePin}

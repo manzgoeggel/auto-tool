@@ -4,17 +4,21 @@ import { upsertListing, getExistingExternalIds } from '@/lib/db/queries/listings
 import { scrapeMobileDe } from '@/lib/scraper/mobile-de';
 import { scoreAndSaveListing } from '@/lib/scoring/combined';
 import { updateBenchmarksFromListings } from '@/lib/db/queries/benchmarks';
+import { getOrFetchAutoscoutPrice } from '@/lib/db/queries/autoscout';
+import { getMinPriceFromAutoscout24 } from '@/lib/scraper/autoscout24';
 import { db } from '@/lib/db';
 import { listings, scores } from '@/lib/db/schema';
 import { eq, and, lte, gte, isNotNull, desc, sql, or, inArray } from 'drizzle-orm';
 
 export const maxDuration = 300;
 
+export type AS24PriceMap = Record<string, { minPriceChf: number; listingUrl: string } | null>;
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     const { dealId } = body;
-    // forceRefresh=true scrapes more pages (5 vs 2)
+    // forceRefresh=true scrapes more pages (10 vs 5)
     const forceRefresh = body.forceRefresh === true;
 
     if (!dealId) return NextResponse.json({ error: 'dealId erforderlich' }, { status: 400 });
@@ -25,14 +29,12 @@ export async function POST(request: NextRequest) {
     console.log(`[Deal ${deal.id}] Suche nach "${deal.name}" (Budget CHF ${deal.budgetChf})`);
 
     // ── Step 1: Query existing DB listings matching deal criteria ─────────────
-    // This is the fast path — no scraping needed if we already have the data.
     const dbConditions = [
       eq(listings.isActive, true),
       isNotNull(scores.totalLandedCostChf),
       lte(scores.totalLandedCostChf, deal.budgetChf),
     ];
 
-    // Brand filter: title ILIKE '%Porsche%' OR '%BMW%'
     const brands = (deal.brands ?? []) as string[];
     const models = (deal.models ?? []) as string[];
     if (brands.length > 0) {
@@ -60,8 +62,6 @@ export async function POST(request: NextRequest) {
     console.log(`[Deal ${deal.id}] ${existingRows.length} passende Inserate in DB gefunden`);
 
     // ── Step 2: Scrape mobile.de for fresh listings ───────────────────────────
-    // Normal search: 5 pages (~100 listings). Force refresh: 10 pages (~200).
-    // Price cap is set in the URL so mobile.de pre-filters by budget.
     const scrapePages = forceRefresh ? 10 : 5;
     let scraped = 0;
     const newIds: number[] = [];
@@ -77,7 +77,7 @@ export async function POST(request: NextRequest) {
         yearMax: deal.yearMax ?? null,
         mileageMax: deal.mileageMax ?? null,
         priceMin: null,
-        priceMax: Math.round((deal.budgetChf / 0.95) * 0.82), // budget → EUR price ceiling
+        priceMax: Math.round((deal.budgetChf / 0.95) * 0.82),
         fuelTypes: [],
         transmissions: [],
         minExpectedMarginChf: null,
@@ -97,7 +97,6 @@ export async function POST(request: NextRequest) {
       );
       scraped = scrapeResult.listings.length;
 
-      // Upsert new listings
       for (const raw of scrapeResult.listings) {
         try {
           const id = await upsertListing(raw);
@@ -110,7 +109,6 @@ export async function POST(request: NextRequest) {
     let aiScored = 0;
     if (newIds.length > 0) {
       await updateBenchmarksFromListings();
-      // Heuristic score all new listings quickly
       const toScore = await db
         .select()
         .from(listings)
@@ -118,15 +116,14 @@ export async function POST(request: NextRequest) {
       for (const l of toScore) {
         try { await scoreAndSaveListing(l, true /* skipAI */); } catch { /* skip */ }
       }
-      // Full AI score all new listings
       console.log(`[Deal ${deal.id}] AI-Bewertung für ${toScore.length} neue Inserate…`);
       const aiResults = await Promise.allSettled(
-        toScore.map((l) => scoreAndSaveListing(l, false /* full AI */))
+        toScore.map((l) => scoreAndSaveListing(l, false))
       );
       aiScored = aiResults.filter((r) => r.status === 'fulfilled').length;
     }
 
-    // ── Step 4: Re-query all matching listings (DB + newly scraped) ───────────
+    // ── Step 4: Re-query all matching listings ────────────────────────────────
     const allRows = await db
       .select()
       .from(listings)
@@ -156,7 +153,6 @@ export async function POST(request: NextRequest) {
       .orderBy(desc(scores.combinedScore))
       .limit(50);
 
-    // Save as deal results
     await saveDealResults(
       deal.id,
       finalRows.map((r) => ({
@@ -167,12 +163,66 @@ export async function POST(request: NextRequest) {
       })),
     );
 
+    // ── Step 6: Fetch AutoScout24.ch min prices for each brand+model combo ────
+    // Build unique brand/model pairs from the deal definition and results
+    const as24Keys = new Set<string>();
+
+    // From deal brands/models definition
+    if (brands.length > 0) {
+      for (const brand of brands) {
+        if (models.length > 0) {
+          for (const model of models) {
+            as24Keys.add(`${brand}||${model}`);
+          }
+        } else {
+          as24Keys.add(`${brand}||`);
+        }
+      }
+    }
+
+    // Also add brand+model combos from actual result listings (title-based extraction is imprecise,
+    // so we rely on the deal's brand/model definition as the primary source)
+
+    const autoscoutPrices: AS24PriceMap = {};
+
+    if (as24Keys.size > 0) {
+      console.log(`[Deal ${deal.id}] Fetching AS24.ch prices for ${as24Keys.size} brand/model combos…`);
+
+      const as24Fetches = Array.from(as24Keys).map(async (key) => {
+        const [brand, model] = key.split('||');
+        const mapKey = model ? `${brand}/${model}` : brand;
+        try {
+          const result = await getOrFetchAutoscoutPrice(
+            brand,
+            model || null,
+            deal.yearMin ?? null,
+            getMinPriceFromAutoscout24,
+          );
+          autoscoutPrices[mapKey] = result
+            ? { minPriceChf: result.minPriceChf, listingUrl: result.listingUrl }
+            : null;
+          if (result) {
+            console.log(
+              `[Deal ${deal.id}] AS24 ${mapKey}: CHF ${result.minPriceChf.toLocaleString()} ` +
+              `(${result.cached ? 'cached' : 'fresh'})`
+            );
+          }
+        } catch (err) {
+          console.error(`[Deal ${deal.id}] AS24 fetch failed for ${mapKey}:`, err);
+          autoscoutPrices[mapKey] = null;
+        }
+      });
+
+      await Promise.allSettled(as24Fetches);
+    }
+
     return NextResponse.json({
       success: true,
       fromDb: existingRows.length,
       scraped,
       aiScored,
       topResults: finalRows.length,
+      autoscoutPrices,
     });
   } catch (err) {
     console.error('Deal-Suche fehlgeschlagen:', err);

@@ -127,6 +127,21 @@ export const dealListings = pgTable('deal_listings', {
   addedAt: timestamp('added_at').defaultNow(),
 });
 
+/**
+ * autoscoutPrices — cached cheapest AutoScout24.ch listing per brand+model+yearFrom.
+ * Used to compute the CH resale floor price and arbitrage delta for each deal result.
+ * Refreshed at most once per 24h per brand/model/year combo.
+ */
+export const autoscoutPrices = pgTable('autoscout_prices', {
+  id: serial('id').primaryKey(),
+  brand: text('brand').notNull(),          // e.g. "Porsche"
+  model: text('model').notNull(),          // e.g. "911"
+  yearFrom: integer('year_from'),          // filter used (deal.yearMin or null for any year)
+  minPriceChf: integer('min_price_chf'),   // cheapest listing price found, in CHF
+  listingUrl: text('listing_url'),         // direct link to the cheapest AS24.ch listing
+  fetchedAt: timestamp('fetched_at').defaultNow().notNull(),
+});
+
 // Type exports from schema
 export type SearchConfig = typeof searchConfigs.$inferSelect;
 export type NewSearchConfig = typeof searchConfigs.$inferInsert;
@@ -138,3 +153,5 @@ export type MarketBenchmarkRow = typeof marketBenchmarks.$inferSelect;
 export type Deal = typeof deals.$inferSelect;
 export type NewDeal = typeof deals.$inferInsert;
 export type DealListing = typeof dealListings.$inferSelect;
+export type AutoscoutPrice = typeof autoscoutPrices.$inferSelect;
+export type NewAutoscoutPrice = typeof autoscoutPrices.$inferInsert;
