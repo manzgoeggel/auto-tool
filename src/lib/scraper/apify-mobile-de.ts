@@ -1,46 +1,52 @@
 /**
  * apify-mobile-de.ts
  *
- * Replaces the Bright Data / ScraperAPI scraper with the Apify
- * `3x1t/mobile-de-scraper-ppr` actor (Pay-Per-Result).
+ * Scrapes mobile.de via the Apify `3x1t/mobile-de-scraper-ppr` actor.
  *
- * The actor accepts mobile.de search page URLs via the `start_urls` input
- * and returns structured car listing objects — no HTML parsing required.
+ * REAL INPUT SCHEMA (confirmed from live runs):
+ *   models            string[]  — ["Porsche|911", "BMW|M3"] — brand|model pairs
+ *                                 use brand name only for all models: ["Porsche"]
+ *   automaticPaging   boolean   — true = actor paginates automatically
+ *   maxItems          integer   — total result cap across all models
+ *   searchPageURLMaxItems integer — per-search-URL result cap
+ *   searchCategory    string    — "Car"
+ *   sort              string    — "Standard" | "Price" | "Mileage" etc.
+ *   fuelType          string[]  — [] for all
+ *   transmission      string[]  — [] for all
+ *   showDamagedVehicles string  — "Any" | "Yes" | "No"
+ *   -- also supports URL mode --
+ *   start_urls        {url}[]   — mobile.de search URLs (alternative to models)
+ *   scrape_page_limit integer   — pages to scrape per start_url
+ *
+ * REAL OUTPUT SCHEMA (confirmed from live dataset):
+ *   id               number   — listing ID (use as externalId)
+ *   url              string   — listing detail URL
+ *   title            string
+ *   brand            string
+ *   model            string
+ *   previewImage     string   — first image URL
+ *   images           string[] — all image URLs
+ *   price.total.amount  number — price in EUR
+ *   price.total.currency string
+ *   attributes       object   — keyed by label, e.g.:
+ *     "Mileage"            → "110,000 km"
+ *     "First Registration" → "12/2007"
+ *     "Power"              → "239 kW (325 hp)"
+ *     "Fuel"               → "Petrol"
+ *     "Transmission"       → "Automatic"
+ *     "Vehicle condition"  → "Used vehicle, Accident-free"
+ *     "Colour"             → "Grey Metallic"
+ *     "Category"           → "Sports Car/Coupe"
+ *   features         string[] — equipment list
+ *   description      string
+ *   dealerDetails.name        string
+ *   dealerDetails.sellerType  string — "Dealer" | "Private"
+ *   dealerDetails.address     string — "..., DE-12345 City"
+ *   createdDate      string   — ISO timestamp
+ *   modifiedDate     string
  *
  * Required env var:
- *   APIFY_TOKEN  — API token from console.apify.com → Settings → API & Integrations
- *
- * Apify run-sync endpoint (waits for completion, max 300 s):
- *   POST https://api.apify.com/v2/acts/3x1t~mobile-de-scraper-ppr/run-sync-get-dataset-items
- *
- * Input schema (known fields):
- *   start_urls         array of { url: string }   — mobile.de search page URLs
- *   scrape_page_limit  integer                     — max pages per URL to crawl
- *
- * Output schema (fields returned per listing item):
- *   id               string   — mobile.de listing ID (our externalId)
- *   url              string   — listing page URL
- *   title            string   — full listing title
- *   price            number   — price in EUR (may be netto/gross depending on listing)
- *   mileage          number   — km
- *   firstRegistration string  — "MM/YYYY"
- *   power            string   — e.g. "190 PS (140 kW)"
- *   fuelType         string   — e.g. "Benzin", "Diesel", "Elektro"
- *   transmission     string   — e.g. "Automatik", "Schaltgetriebe"
- *   sellerType       string   — "dealer" | "private"
- *   sellerName       string   — dealer name
- *   location         string   — city / region
- *   imageUrl         string   — main photo URL
- *   vatDeductible    boolean  — MwSt. ausweisbar
- *   accidentDamage   boolean  — has accident damage
- *   bodyType         string   — e.g. "Sportwagen/Coupé"
- *   color            string   — exterior colour
- *   description      string   — listing description text
- *   features         string[] — list of equipment/features
- *
- * Note: field names are best-guesses based on the actor's README and
- * common mobile.de data conventions. The adapter below normalises all
- * known variants so the rest of the codebase stays unchanged.
+ *   APIFY_TOKEN  — from console.apify.com → Settings → API & Integrations
  */
 
 import { buildSearchUrl } from './url-builder';
@@ -50,114 +56,140 @@ import type { RawListing } from '@/lib/types/index';
 const APIFY_ACTOR = '3x1t~mobile-de-scraper-ppr';
 const APIFY_BASE = 'https://api.apify.com/v2';
 
-// How many pages the Apify actor should crawl per start URL.
-// Each mobile.de page has 20 listings, so 5 pages → up to 100 results.
-const DEFAULT_PAGES = 5;
-
 function getApifyToken(): string {
   const token = process.env.APIFY_TOKEN;
   if (!token) throw new Error('APIFY_TOKEN env var is not set');
   return token;
 }
 
+// ─── Attribute helpers ────────────────────────────────────────────────────────
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function attr(attributes: Record<string, any>, ...keys: string[]): string {
+  for (const k of keys) {
+    if (attributes[k] != null) return String(attributes[k]);
+  }
+  return '';
+}
+
+function parseMileage(raw: string): number {
+  // "110,000 km" → 110000, "103,407 km" → 103407
+  const m = raw.replace(/[,.\s]/g, '').match(/(\d+)/);
+  return m ? parseInt(m[1], 10) : 0;
+}
+
+function parseRegistration(raw: string): { year: number; month?: number } {
+  // "12/2007" or "01/2007"
+  const mmYYYY = raw.match(/(\d{1,2})\/(\d{4})/);
+  if (mmYYYY) return { month: parseInt(mmYYYY[1], 10), year: parseInt(mmYYYY[2], 10) };
+  const yearOnly = raw.match(/(\d{4})/);
+  return { year: yearOnly ? parseInt(yearOnly[1], 10) : 0 };
+}
+
+function parsePower(raw: string): string | undefined {
+  // "239 kW (325 hp)" — keep as-is; also handle "239kW" or "325 PS"
+  if (!raw) return undefined;
+  return raw.trim() || undefined;
+}
+
+function normaliseFuel(raw: string): string {
+  const lower = raw.toLowerCase();
+  if (lower.includes('electric')) return 'Electric';
+  if (lower.includes('plug-in') || lower.includes('plugin')) return 'Plug-in Hybrid';
+  if (lower.includes('hybrid')) return 'Hybrid';
+  if (lower.includes('diesel')) return 'Diesel';
+  if (lower.includes('petrol') || lower.includes('benzin') || lower.includes('gasoline')) return 'Petrol';
+  if (lower.includes('cng') || lower.includes('erdgas')) return 'CNG';
+  if (lower.includes('lpg') || lower.includes('autogas')) return 'LPG';
+  if (lower.includes('hydrogen') || lower.includes('wasser')) return 'Hydrogen';
+  return raw || 'Unknown';
+}
+
+function normaliseTransmission(raw: string): string {
+  const lower = raw.toLowerCase();
+  if (lower.includes('automatic')) return 'Automatic';
+  if (lower.includes('manual') || lower.includes('schalt') || lower.includes('manuell')) return 'Manual';
+  if (lower.includes('semi')) return 'Semi-automatic';
+  return raw || 'Unknown';
+}
+
 // ─── Apify item → RawListing normalisation ────────────────────────────────────
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function normaliseItem(item: Record<string, any>): RawListing | null {
-  // Extract listing ID — the actor may return it as `id`, `listingId`, or from `url`
-  let externalId: string =
-    String(item.id ?? item.listingId ?? item.adId ?? '');
-
-  // Fallback: parse ID from URL
-  if (!externalId && item.url) {
-    const m = String(item.url).match(/id=(\d+)/);
-    if (m) externalId = m[1];
-  }
+  // ID — actor returns numeric id
+  const externalId = item.id != null ? String(item.id) : '';
   if (!externalId) return null;
 
-  const listingUrl: string =
-    item.url ?? item.link ?? item.detailUrl ?? '';
+  const listingUrl: string = item.url ?? '';
   if (!listingUrl) return null;
 
-  const title: string = item.title ?? item.name ?? item.headline ?? '';
+  const title: string = item.title ?? '';
   if (!title) return null;
 
-  // Price — actor may return gross or net; we store as-is (EUR)
+  // Price — nested: price.total.amount
   const priceEur: number =
-    Number(item.price ?? item.priceEur ?? item.priceGross ?? 0);
+    Number(item.price?.total?.amount ?? item.price?.amount ?? item.price ?? 0);
+
+  // Attributes object
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const attributes: Record<string, any> = item.attributes ?? {};
 
   // Mileage
-  const mileageKm: number =
-    Number(item.mileage ?? item.mileageKm ?? item.km ?? 0);
+  const mileageKm = parseMileage(attr(attributes, 'Mileage', 'Kilometerstand', 'km'));
 
-  // First registration — "MM/YYYY" or year only
-  let firstRegistrationYear = 0;
-  let firstRegistrationMonth: number | undefined;
-  const regRaw: string = item.firstRegistration ?? item.registration ?? item.year ?? '';
-  if (regRaw) {
-    const mmYYYY = String(regRaw).match(/(\d{1,2})[\/\-](\d{4})/);
-    if (mmYYYY) {
-      firstRegistrationMonth = parseInt(mmYYYY[1], 10);
-      firstRegistrationYear = parseInt(mmYYYY[2], 10);
-    } else {
-      const yearOnly = String(regRaw).match(/(\d{4})/);
-      if (yearOnly) firstRegistrationYear = parseInt(yearOnly[1], 10);
-    }
-  }
+  // First registration
+  const regRaw = attr(attributes, 'First Registration', 'Erstzulassung', 'registration');
+  const { year: firstRegistrationYear, month: firstRegistrationMonth } = parseRegistration(regRaw);
 
-  // Power — normalise to "190 PS (140 kW)" format
-  const power: string | undefined =
-    item.power ?? item.enginePower ?? item.ps ?? undefined;
+  // Power
+  const power = parsePower(attr(attributes, 'Power', 'Leistung', 'power'));
 
-  // Fuel type — normalise German → English
-  const fuelRaw: string = item.fuelType ?? item.fuel ?? '';
-  const fuelType: string = normaliseFuel(fuelRaw) || 'Unknown';
+  // Fuel
+  const fuelType = normaliseFuel(attr(attributes, 'Fuel', 'Kraftstoff', 'fuelType'));
 
   // Transmission
-  const transmissionRaw: string = item.transmission ?? item.gearbox ?? '';
-  const transmission: string = normaliseTransmission(transmissionRaw) || 'Unknown';
+  const transmission = normaliseTransmission(attr(attributes, 'Transmission', 'Getriebe', 'transmission'));
 
   // Seller
+  const sellerTypeRaw: string = item.dealerDetails?.sellerType ?? '';
   const sellerType: 'dealer' | 'private' =
-    String(item.sellerType ?? item.seller ?? 'dealer').toLowerCase().includes('privat')
-      ? 'private'
-      : 'dealer';
-  const sellerName: string | undefined = item.sellerName ?? item.dealerName ?? undefined;
+    sellerTypeRaw.toLowerCase().includes('private') ? 'private' : 'dealer';
+  const sellerName: string | undefined = item.dealerDetails?.name ?? undefined;
 
-  // Location
-  const location: string = item.location ?? item.city ?? item.address ?? '';
-
-  // Country — mobile.de is DE-only
-  const country: string = item.country ?? 'DE';
+  // Location — dealer address: "Gasstraße 13, DE-44894 Bochum" → extract city
+  const addressRaw: string = item.dealerDetails?.address ?? '';
+  const cityMatch = addressRaw.match(/DE-\d{5}\s+(.+)$/);
+  const location: string = cityMatch ? cityMatch[1] : addressRaw;
+  const country = 'DE';
 
   // Image
   const imageUrl: string | undefined =
-    Array.isArray(item.images) && item.images.length > 0
-      ? String(item.images[0]?.url ?? item.images[0] ?? '')
-      : item.imageUrl ?? item.thumbnail ?? item.mainImage ?? undefined;
+    item.previewImage ??
+    (Array.isArray(item.images) && item.images.length > 0 ? String(item.images[0]) : undefined);
 
-  // VAT — actor may return boolean or text signal
+  // VAT — mobile.de doesn't include VAT status in the Apify output directly.
+  // Fall back to checking the URL (we filter with vat=1 in buildSearchUrl)
+  // or the attributes for hints.
+  const vatAttr = attr(attributes, 'VAT', 'MwSt', 'Mehrwertsteuer', 'VAT deductible');
   const vatDeductible: boolean =
-    item.vatDeductible === true ||
-    item.vat === true ||
-    String(item.vatDeductible ?? item.vat ?? '').toLowerCase().includes('ausweisbar') ||
-    String(item.vatDeductible ?? '').toLowerCase() === 'true';
+    vatAttr.toLowerCase().includes('deduct') ||
+    vatAttr.toLowerCase().includes('ausweisbar') ||
+    // If we built the URL with vat=1, assume all returned results are VAT-deductible
+    (item.url ? String(item.url).includes('vat=1') : false);
 
   // Accident damage
+  const conditionRaw = attr(attributes, 'Vehicle condition', 'Fahrzeugzustand');
   const hasAccidentDamage: boolean =
-    item.accidentDamage === true ||
-    item.hasAccidentDamage === true ||
-    String(item.accidentDamage ?? item.hasAccidentDamage ?? '').toLowerCase() === 'true';
+    conditionRaw.toLowerCase().includes('accident') &&
+    !conditionRaw.toLowerCase().includes('accident-free') &&
+    !conditionRaw.toLowerCase().includes('unfallfrei');
 
   // Extras
-  const bodyType: string | undefined = item.bodyType ?? item.category ?? undefined;
-  const color: string | undefined = item.color ?? item.colour ?? undefined;
-  const description: string | undefined = item.description ?? item.text ?? undefined;
-  const features: string[] | undefined = Array.isArray(item.features)
-    ? item.features.map(String)
-    : Array.isArray(item.equipment)
-    ? item.equipment.map(String)
-    : undefined;
+  const bodyType: string | undefined = attr(attributes, 'Category', 'Kategorie', 'bodyType') || undefined;
+  const color: string | undefined = attr(attributes, 'Colour', 'Farbe', 'color') || undefined;
+  const description: string | undefined = item.description ?? undefined;
+  const features: string[] | undefined = Array.isArray(item.features) ? item.features.map(String) : undefined;
 
   return {
     externalId,
@@ -168,13 +200,13 @@ function normaliseItem(item: Record<string, any>): RawListing | null {
     firstRegistrationMonth,
     fuelType,
     transmission,
-    power: power ? String(power) : undefined,
+    power,
     sellerType,
     sellerName,
     location,
     country,
     listingUrl,
-    imageUrl: imageUrl || undefined,
+    imageUrl,
     bodyType,
     color,
     features,
@@ -184,25 +216,40 @@ function normaliseItem(item: Record<string, any>): RawListing | null {
   };
 }
 
-function normaliseFuel(raw: string): string {
-  const lower = raw.toLowerCase();
-  if (lower.includes('elektro') || lower.includes('electric')) return 'Electric';
-  if (lower.includes('plug-in') || lower.includes('plugin')) return 'Plug-in Hybrid';
-  if (lower.includes('hybrid')) return 'Hybrid';
-  if (lower.includes('diesel')) return 'Diesel';
-  if (lower.includes('benzin') || lower.includes('petrol') || lower.includes('gasoline')) return 'Petrol';
-  if (lower.includes('erdgas') || lower.includes('cng')) return 'CNG';
-  if (lower.includes('autogas') || lower.includes('lpg')) return 'LPG';
-  if (lower.includes('wasser') || lower.includes('hydrogen')) return 'Hydrogen';
-  return raw || 'Unknown';
-}
+// ─── Build Apify input from SearchConfig ──────────────────────────────────────
 
-function normaliseTransmission(raw: string): string {
-  const lower = raw.toLowerCase();
-  if (lower.includes('automat') || lower.includes('automatic')) return 'Automatic';
-  if (lower.includes('manual') || lower.includes('schalt') || lower.includes('manuell')) return 'Manual';
-  if (lower.includes('halbaut') || lower.includes('semi')) return 'Semi-automatic';
-  return raw || 'Unknown';
+/**
+ * Build the Apify actor input from a SearchConfig.
+ *
+ * Strategy: use URL mode (start_urls) so all our existing filters (year, price,
+ * mileage, fuel, transmission, VAT) are preserved exactly as before.
+ * Set automaticPaging=true so the actor paginates itself, and cap with maxItems.
+ */
+function buildApifyInput(
+  config: SearchConfig,
+  maxItems: number,
+  options: { vatOnly?: boolean } = {},
+): Record<string, unknown> {
+  // Use page 1 as the seed URL — actor will paginate automatically
+  const seedUrl = buildSearchUrl(config, 1, options);
+
+  return {
+    start_urls: [{ url: seedUrl }],
+    automaticPaging: true,
+    scrape_page_limit: Math.ceil(maxItems / 20) + 1, // safety buffer
+    maxItems,
+    searchPageURLMaxItems: maxItems,
+    searchCategory: 'Car',
+    searchTerms: [],
+    models: [],
+    sort: 'Standard',
+    fuelType: [],
+    transmission: [],
+    vehicleType: [],
+    exteriorColor: [],
+    showDamagedVehicles: 'No',
+    reviewLimit: 0,
+  };
 }
 
 // ─── Main scrape function ─────────────────────────────────────────────────────
@@ -210,15 +257,15 @@ function normaliseTransmission(raw: string): string {
 /**
  * Scrape mobile.de via the Apify `3x1t/mobile-de-scraper-ppr` actor.
  *
- * Mobile.de caps each page at 20 results. To get multiple pages we pass all
- * page URLs as separate entries in `start_urls` so Apify fetches them in
- * parallel (one actor run per URL in the array).
+ * Uses URL mode with automaticPaging=true so the actor handles pagination
+ * internally. maxPages controls how many pages worth of results to fetch
+ * (each page = 20 listings).
  *
  * Returns the same shape as the old scrapeMobileDe() so callers need no changes.
  */
 export async function scrapeMobileDeViaApify(
   config: SearchConfig,
-  maxPages: number = DEFAULT_PAGES,
+  maxPages: number = 5,
   existingIds: Set<string> = new Set(),
   options: { vatOnly?: boolean } = {},
 ): Promise<{
@@ -231,29 +278,18 @@ export async function scrapeMobileDeViaApify(
 }> {
   const token = getApifyToken();
   const errors: string[] = [];
+  const maxItems = maxPages * 20;
 
-  // Build one URL per page and submit all as start_urls so Apify fetches
-  // them in parallel. mobile.de caps each page at 20 listings, so
-  // maxPages=5 → up to 100 results.
-  const startUrls = Array.from({ length: maxPages }, (_, i) => ({
-    url: buildSearchUrl(config, i + 1, options),
-  }));
+  const input = buildApifyInput(config, maxItems, options);
 
   console.log(
-    `[apify] Submitting ${startUrls.length} page URLs to Apify actor` +
-    ` (pages 1–${maxPages}, up to ${maxPages * 20} listings)`,
+    `[apify] Submitting to actor (maxItems=${maxItems}, ` +
+    `scrape_page_limit=${input.scrape_page_limit}, url=${(input.start_urls as {url:string}[])[0].url})`,
   );
-
-  const input = {
-    start_urls: startUrls,
-    scrape_page_limit: 1, // each URL is already a specific page
-  };
 
   let rawItems: Record<string, unknown>[] = [];
 
   try {
-    // run-sync-get-dataset-items: starts the actor and streams results back
-    // when it finishes. Apify timeout is 300 s for sync runs.
     const endpoint =
       `${APIFY_BASE}/acts/${APIFY_ACTOR}/run-sync-get-dataset-items` +
       `?token=${token}&format=json&clean=true`;
@@ -264,7 +300,6 @@ export async function scrapeMobileDeViaApify(
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(input),
-      // Node fetch signal for 290-second timeout (Apify allows 300 s)
       signal: AbortSignal.timeout(290_000),
     });
 
@@ -279,13 +314,7 @@ export async function scrapeMobileDeViaApify(
     const msg = err instanceof Error ? err.message : String(err);
     errors.push(`Apify run failed: ${msg}`);
     console.error('[apify] Actor run failed:', msg);
-    return {
-      listings: [],
-      newCount: 0,
-      updatedCount: 0,
-      pagesScraped: 0,
-      errors,
-    };
+    return { listings: [], newCount: 0, updatedCount: 0, pagesScraped: 0, errors };
   }
 
   // Normalise items → RawListing[]
@@ -300,7 +329,6 @@ export async function scrapeMobileDeViaApify(
       seen.add(listing.externalId);
       allListings.push(listing);
     } catch (err) {
-      // Skip unparseable items silently
       console.warn('[apify] Failed to normalise item:', err);
     }
   }
@@ -310,7 +338,7 @@ export async function scrapeMobileDeViaApify(
 
   console.log(
     `[apify] Done: ${allListings.length} unique listings ` +
-    `(${newListings.length} new, ${knownListings.length} known)`
+    `(${newListings.length} new, ${knownListings.length} known)`,
   );
 
   return {
@@ -318,7 +346,10 @@ export async function scrapeMobileDeViaApify(
     newCount: newListings.length,
     updatedCount: knownListings.length,
     totalResults: rawItems.length,
-    pagesScraped: maxPages, // Actor handled pagination internally
+    pagesScraped: Math.ceil(allListings.length / 20),
     errors,
   };
 }
+
+// Keep default export alias for any direct imports
+export default scrapeMobileDeViaApify;
