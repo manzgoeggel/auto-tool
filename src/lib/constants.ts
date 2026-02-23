@@ -346,3 +346,100 @@ export function getPorsche911ChResale(
 
   return { low: bracket.low, median: bracket.median, high: bracket.high };
 }
+
+// ─── AutoScout24.ch URL slugs ──────────────────────────────────────────────────
+//
+// AutoScout24.ch uses lowercase slugs in the search URL:
+//   /de/lst?make=porsche&model=911
+//
+// Brand slugs: lowercase, hyphens for spaces
+export const AUTOSCOUT24_BRAND_SLUGS: Record<string, string> = {
+  'Porsche': 'porsche',
+  'BMW': 'bmw',
+  'Mercedes-Benz': 'mercedes-benz',
+  'Audi': 'audi',
+  'Ferrari': 'ferrari',
+  'Lamborghini': 'lamborghini',
+  'McLaren': 'mclaren',
+  'Maserati': 'maserati',
+  'Bentley': 'bentley',
+  'Rolls-Royce': 'rolls-royce',
+  'Aston Martin': 'aston-martin',
+  'Jaguar': 'jaguar',
+  'Land Rover': 'land-rover',
+  'Lotus': 'lotus',
+  'Alpine': 'alpine',
+  'Volkswagen': 'volkswagen',
+  'Toyota': 'toyota',
+  'Volvo': 'volvo',
+  'Tesla': 'tesla',
+  'Lexus': 'lexus',
+};
+
+// Model slugs: lowercase, hyphens for spaces, special cases noted
+export const AUTOSCOUT24_MODEL_SLUGS: Record<string, Record<string, string>> = {
+  'Porsche': {
+    '911': '911',
+    'Cayenne': 'cayenne',
+    'Panamera': 'panamera',
+    'Macan': 'macan',
+    'Taycan': 'taycan',
+    'Boxster': 'boxster',
+    'Cayman': 'cayman',
+  },
+  'BMW': {
+    'M3': 'm3',
+    'M4': 'm4',
+    'M5': 'm5',
+    'M8': 'm8',
+    '8 Series': '8-series',
+    '7 Series': '7-series',
+    'iX': 'ix',
+    'i4': 'i4',
+  },
+  'Mercedes-Benz': {
+    'AMG GT': 'amg-gt',
+    'S-Class': 's-class',
+    'G-Class': 'g-class',
+    'E-Class': 'e-class',
+    'C-Class': 'c-class',
+  },
+  'Audi': {
+    'R8': 'r8',
+    'RS6': 'rs6',
+    'RS7': 'rs7',
+    'RS3': 'rs3',
+    'RS4': 'rs4',
+    'RS5': 'rs5',
+    'Q8': 'q8',
+    'e-tron GT': 'e-tron-gt',
+  },
+  'Ferrari': {
+    'Roma': 'roma',
+    'SF90': 'sf90',
+    'F8': 'f8-tributo',
+    '812': '812',
+    '296': '296-gtb',
+  },
+  'Lamborghini': {
+    'Huracan': 'huracan',
+    'Urus': 'urus',
+    'Revuelto': 'revuelto',
+  },
+};
+
+/**
+ * Convert a brand name to its AutoScout24.ch URL slug.
+ * Falls back to lowercase with hyphens if not in the map.
+ */
+export function toAutoscout24BrandSlug(brand: string): string {
+  return AUTOSCOUT24_BRAND_SLUGS[brand] ?? brand.toLowerCase().replace(/\s+/g, '-');
+}
+
+/**
+ * Convert a model name to its AutoScout24.ch URL slug.
+ * Falls back to lowercase with hyphens if not in the map.
+ */
+export function toAutoscout24ModelSlug(brand: string, model: string): string {
+  return AUTOSCOUT24_MODEL_SLUGS[brand]?.[model] ?? model.toLowerCase().replace(/\s+/g, '-');
+}
