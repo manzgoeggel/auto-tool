@@ -247,7 +247,7 @@ function buildApifyInput(
     transmission: [],
     vehicleType: [],
     exteriorColor: [],
-    showDamagedVehicles: 'No',
+    showDamagedVehicles: 'Any',
     reviewLimit: 0,
   };
 }
